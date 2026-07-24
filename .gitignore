@@ -1,0 +1,27 @@
+# --- cocotb / simulation build ---
+sim_build/
+results.xml
+*.vcd
+*.fst
+dump*.fst
+
+# --- Verilator ---
+obj_dir/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Vivado / synthesis junk ---
+*.jou
+vivado*.log
+vivado*.str
+.Xil/
+*.pb
+*.wdb
+xsim.dir/
+
+# --- editor / OS ---
+*.swp
+.DS_Store
