@@ -27,7 +27,7 @@ module feed_arbiter #(
     output logic                 fix_served_valid
 );
 
-localparam logic [HICCUP_W-1:0] ARM_CNT = HICCUP_CYCLES - 3;
+localparam logic [HICCUP_W-1:0] ARM_CNT = HICCUP_W'(HICCUP_CYCLES - 3);
 
 // synthesis translate_off
 initial begin
@@ -200,7 +200,7 @@ end
 // STAGE 2
 // =================================================================
 
-assign giveup = (hiccup_cnt == HICCUP_CYCLES - 1) && |serve_feed_q && !serve_valid_q;
+assign giveup = (hiccup_cnt == HICCUP_W'(HICCUP_CYCLES - 1)) && |serve_feed_q && !serve_valid_q;
 
 always_comb begin : hiccup_upd
     hiccup_cnt_nxt = hiccup_cnt;
@@ -224,7 +224,7 @@ always_ff @(posedge clk) begin
     if (!rst_n)
         invalidate_q <= '0;
     else if (out_ready)
-        invalidate_q <= (hiccup_cnt == ARM_CNT) ? serve_feed_q : '0;
+        invalidate_q <= ((hiccup_cnt == ARM_CNT) && !serve_valid_q) ? serve_feed_q : '0;
 end
 
 // ---- invalidate_feed: fires when the LIVE serve_feed matches the

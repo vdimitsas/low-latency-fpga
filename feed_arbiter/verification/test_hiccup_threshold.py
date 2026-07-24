@@ -26,11 +26,11 @@ async def _open_packet(dut, sb, f, seq, data0):
     drive_feeds(dut, valid=(1 << f), sop=(1 << f), data=data, seq=seqs)
     await _edge_sample(dut, sb)
 
-
 @cocotb.test()
 async def test_arm_confirm_giveup_timing(dut):
     assert HICCUP_CYCLES >= 3, \
         "this build's HICCUP_CYCLES is below the supported minimum"
+    dut._log.info(f"ARM_CNT = {int(dut.dut.ARM_CNT.value)}")
     for f in range(NUM_FEEDS):
         await reset_dut(dut)
         sb = OutScoreboard(dut)
@@ -41,14 +41,16 @@ async def test_arm_confirm_giveup_timing(dut):
         for cyc in range(HICCUP_CYCLES + 2):
             await ReadOnly()
             inv = (int(dut.invalidate_feed.value) >> f) & 1
+            dut._log.info(f"cyc={cyc+1} inv={inv} inv_seen_at={inv_seen_at} hiccup_cnt={int(dut.dut.hiccup_cnt.value)} invalidate_q={int(dut.dut.invalidate_q.value)} giveup={int(dut.dut.giveup.value)} serve_valid_q={int(dut.dut.serve_valid_q.value)}")
             if inv and inv_seen_at is None:
                 inv_seen_at = cyc
             await Timer(1, unit="ns")
             await _edge_sample(dut, sb)
-
-        assert inv_seen_at == HICCUP_CYCLES - 1, \
+            
+        exp_fire = HICCUP_CYCLES - 1
+        assert inv_seen_at == exp_fire, \
             f"feed {f}: invalidate fired at stalled-cycle {inv_seen_at}, " \
-            f"expected exactly {HICCUP_CYCLES - 1} (HICCUP_CYCLES=" \
+            f"expected exactly {exp_fire} (HICCUP_CYCLES=" \
             f"{HICCUP_CYCLES})"
         dut._log.info(f"feed {f}: invalidate confirmed at cycle "
                       f"{inv_seen_at} for HICCUP_CYCLES={HICCUP_CYCLES}")

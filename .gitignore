@@ -1,19 +1,16 @@
-# --- cocotb / simulation build ---
+cat > .gitignore << 'EOF'
 sim_build/
 results.xml
 *.vcd
 *.fst
 dump*.fst
-
-# --- Verilator ---
+*.dat
+.pytest_cache/
 obj_dir/
-
-# --- Python ---
+*.verilator*
 __pycache__/
 *.pyc
 *.pyo
-
-# --- Vivado / synthesis junk ---
 *.jou
 vivado*.log
 vivado*.str
@@ -21,7 +18,6 @@ vivado*.str
 *.pb
 *.wdb
 xsim.dir/
-
-# --- editor / OS ---
 *.swp
 .DS_Store
+EOF

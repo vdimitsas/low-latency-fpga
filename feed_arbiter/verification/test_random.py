@@ -256,10 +256,15 @@ class Golden:
         hiccup_cnt_committed = hiccup_cnt_nxt if s.out_ready \
                                else self.hiccup_cnt
 
-        # ---- invalidate_q: armed with serve_feed_q, out_ready-gated
+        # ---- invalidate_q: armed with serve_feed_q, out_ready-gated.
+        #      Gated with !serve_valid_q so the arm point (ARM_CNT) can
+        #      only latch during genuine silence, not on the initial
+        #      valid serve — matches the RTL fix that removes the
+        #      spurious first arm at the HICCUP_CYCLES=3 boundary.
         if s.out_ready:
             invalidate_q_nxt = self.serve_feed_q \
-                               if (self.hiccup_cnt == ARM_CNT) else 0
+                               if (self.hiccup_cnt == ARM_CNT
+                                   and not self.serve_valid_q) else 0
         else:
             invalidate_q_nxt = self.invalidate_q
 
