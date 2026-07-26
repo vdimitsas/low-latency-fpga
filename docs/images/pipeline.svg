@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="#1a1a1a" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter"/>
+    </marker>
+    <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="#8a8a8a" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="600" fill="#ffffff"/>
+
+  <text x="56" y="248" font-size="12" fill="#5a5a5a">N feeds</text>
+  <line x1="56" y1="266" x2="118" y2="266" stroke="#1a1a1a" stroke-width="1" marker-end="url(#ah)"/>
+
+  <rect x="128" y="234" width="150" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="203" y="262" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">DEDUP</text>
+  <text x="203" y="281" font-size="11" fill="#6a6a6a" text-anchor="middle">drops served copies</text>
+
+  <line x1="278" y1="266" x2="336" y2="266" stroke="#1a1a1a" stroke-width="1" marker-end="url(#ah)"/>
+
+  <rect x="346" y="234" width="150" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="421" y="262" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">FEED_BUFFER</text>
+  <text x="421" y="281" font-size="11" fill="#6a6a6a" text-anchor="middle">per-feed FIFOs</text>
+
+  <line x1="496" y1="266" x2="554" y2="266" stroke="#1a1a1a" stroke-width="1" marker-end="url(#ah)"/>
+
+  <rect x="564" y="234" width="150" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="639" y="262" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">FEED_ARBITER</text>
+  <text x="639" y="281" font-size="11" fill="#6a6a6a" text-anchor="middle">selects one feed</text>
+
+  <line x1="714" y1="266" x2="772" y2="266" stroke="#1a1a1a" stroke-width="1" marker-end="url(#ah)"/>
+
+  <rect x="782" y="234" width="130" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="847" y="262" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">CHECKSUM</text>
+  <text x="847" y="281" font-size="11" fill="#6a6a6a" text-anchor="middle">validates packet</text>
+
+  <path d="M847 234 L847 96 L203 96 L203 232" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <path d="M421 96 L421 232" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <text x="540" y="86" font-size="11" fill="#6a6a6a" text-anchor="middle">completion feedback</text>
+
+  <path d="M620 234 L620 168 L455 168 L455 232" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <text x="537" y="158" font-size="11" fill="#6a6a6a" text-anchor="middle">invalidate vector</text>
+
+  <path d="M306 266 L306 482 L396 482" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <rect x="303" y="263" width="6" height="6" fill="#1a1a1a"/>
+  <text x="196" y="478" font-size="11" fill="#6a6a6a">packet arrivals</text>
+
+  <path d="M824 298 L824 414 L481 414 L481 448" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <path d="M876 298 L876 448" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <text x="576" y="405" font-size="11" fill="#6a6a6a" text-anchor="middle">checksum failed</text>
+
+  <rect x="406" y="456" width="180" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="496" y="484" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">FIX_TRACKER</text>
+  <text x="496" y="503" font-size="11" fill="#6a6a6a" text-anchor="middle">locates the fix</text>
+
+  <rect x="782" y="456" width="150" height="64" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="857" y="484" font-size="14" fill="#1a1a1a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">TIMER</text>
+  <text x="857" y="503" font-size="11" fill="#6a6a6a" text-anchor="middle">retry deadline</text>
+
+  <path d="M586 488 L672 488 L672 340 L658 340 L658 300" fill="none" stroke="#8a8a8a" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ahg)"/>
+  <text x="684" y="352" font-size="11" fill="#6a6a6a">fixed feed</text>
+</svg>
