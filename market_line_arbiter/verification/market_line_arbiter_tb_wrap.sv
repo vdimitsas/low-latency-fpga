@@ -1,4 +1,4 @@
-module feed_arbiter_tb_wrap #(
+module market_line_arbiter_tb_wrap #(
     parameter NUM_FEEDS     = 4,
     parameter FEED_ID_W     = $clog2(NUM_FEEDS),
     parameter HICCUP_CYCLES = 4,
@@ -41,7 +41,7 @@ module feed_arbiter_tb_wrap #(
         end
     end
 
-    feed_arbiter #(
+    market_line_arbiter #(
         .NUM_FEEDS(NUM_FEEDS),
         .HICCUP_CYCLES(HICCUP_CYCLES),
         .SEQ_W(SEQ_W),

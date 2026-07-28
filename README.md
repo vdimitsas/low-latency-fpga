@@ -11,7 +11,7 @@ can be developed and verified independently before being integrated end to end.
 
 | Component      | Status                                    |
 |----------------|-------------------------------------------|
-| `feed_arbiter` | Implemented, timing closed, and verified. |
+| `market_line_arbiter` | Implemented, timing closed, and verified. |
 
 Further pipeline stages are in development and will be added as their own
 components. Whole-project (end-to-end) results will be documented at this top
@@ -23,7 +23,7 @@ live in that component's README.
 ```
 udp_parser/
 ├── docs/                  # project-level documentation (end-to-end)
-├── feed_arbiter/          # redundant-feed arbitration stage
+├── market_line_arbiter/    # redundant-feed arbitration stage
 │   ├── README.md          # component description, results, how to run
 │   ├── docs/              # component design notes & timing-closure report
 │   ├── rtl/

@@ -56,7 +56,7 @@ Two inputs let the buffer discard data it no longer needs to hold. The arbiter d
 
 Latency through this stage is a range rather than a fixed number: minimum on the bypass path, and bounded above by FIFO depth and how long a feed waits to be served.
 
-**FEED_ARBITER** picks which feed goes downstream, keeps that choice for the whole packet, and gives up on a feed that goes quiet in the middle of a packet for a parameterisable number of cycles. When it gives up, it sends an invalidate vector to FEED_BUFFER, one bit per feed, telling it to clear what is left of that packet so the leftover part is never sent on as a fragment.
+**MARKET_LINE_ARBITER** picks which feed goes downstream, keeps that choice for the whole packet, and gives up on a feed that goes quiet in the middle of a packet for a parameterisable number of cycles. When it gives up, it sends an invalidate vector to FEED_BUFFER, one bit per feed, telling it to clear what is left of that packet so the leftover part is never sent on as a fragment.
 
 **CHECKSUM** validates the served packet. Its result is the definition of success for the pipeline: a packet is only complete once its checksum passes, which is why the completion feedback originates here rather than at the arbiter.
 
@@ -92,14 +92,14 @@ The parser is built one stage at a time. Each component is designed, implemented
 
 | Component | Status |
 |---|---|
-| `feed_arbiter` | Implemented, verified, timing closed |
+| `market_line_arbiter` | Implemented, verified, timing closed |
 | `dedup` | Planned |
 | `feed_buffer` | Planned |
 | `checksum` | Planned |
 | `fix_tracker` | Planned |
 | `timer` | Planned |
 
-Only `feed_arbiter` is complete. It has its own documentation covering its microarchitecture, verification, and timing results in detail.
+Only `market_line_arbiter` is complete. It has its own documentation covering its microarchitecture, verification, and timing results in detail.
 
 The remaining stages are specified at the level described in this document but not yet written. Integration and end to end verification follow once the individual stages are in place.
 

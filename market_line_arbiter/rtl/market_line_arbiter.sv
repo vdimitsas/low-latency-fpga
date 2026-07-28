@@ -1,4 +1,4 @@
-module feed_arbiter #(
+module market_line_arbiter #(
     parameter NUM_FEEDS     = 4,
     parameter FEED_ID_W     = $clog2(NUM_FEEDS),
     parameter HICCUP_CYCLES = 4,
@@ -32,7 +32,7 @@ localparam logic [HICCUP_W-1:0] ARM_CNT = HICCUP_W'(HICCUP_CYCLES - 3);
 // synthesis translate_off
 initial begin
     if (HICCUP_CYCLES < 3) begin
-        $error("feed_arbiter: HICCUP_CYCLES must be >= 3 (got %0d). ",
+        $error("market_line_arbiter: HICCUP_CYCLES must be >= 3 (got %0d). ",
                HICCUP_CYCLES);
         $error("Thresholds of 1 or 2 need a different invalidate path ");
         $error("(no spare cycle to pre-arm) — not supported by this design.");

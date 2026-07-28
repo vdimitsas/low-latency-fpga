@@ -1,6 +1,6 @@
 # ===============================================================
-# cocotb + Verilator Makefile — feed_arbiter
-# Run from feed_arbiter/verification/:
+# cocotb + Verilator Makefile — market_line_arbiter
+# Run from market_line_arbiter/verification/:
 #     make clean && make
 # Sweep the hiccup threshold:
 #     make clean && make HICCUP_CYCLES=8
@@ -18,10 +18,10 @@ export HICCUP_CYCLES
 
 # RTL lives one level up in rtl/; the testbench wrapper and the
 # cocotb Python tests live here in verification/.
-VERILOG_SOURCES += $(PWD)/../rtl/feed_arbiter.sv
-VERILOG_SOURCES += $(PWD)/feed_arbiter_tb_wrap.sv
+VERILOG_SOURCES += $(PWD)/../rtl/market_line_arbiter.sv
+VERILOG_SOURCES += $(PWD)/market_line_arbiter_tb_wrap.sv
 
-TOPLEVEL = feed_arbiter_tb_wrap
+TOPLEVEL = market_line_arbiter_tb_wrap
 
 # override the wrapper's HICCUP_CYCLES parameter at elaboration time
 EXTRA_ARGS += -GHICCUP_CYCLES=$(HICCUP_CYCLES)

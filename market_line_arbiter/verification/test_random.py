@@ -1,6 +1,6 @@
 # ===============================================================
 # test_random.py — constrained-random, full golden model, current
-# feed_arbiter (atomicity + release-one-cycle-after-confirm design).
+# market_line_arbiter (atomicity + release-one-cycle-after-confirm design).
 #
 # Lessons encoded from directed-test debugging:
 #  1. serve_feed_q resets to 0 (not feed-0 one-hot) — no reset bias.

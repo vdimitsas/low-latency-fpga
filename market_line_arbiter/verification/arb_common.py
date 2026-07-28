@@ -1,5 +1,5 @@
 # ===============================================================
-# arb_common.py — shared helpers for the new feed_arbiter suite.
+# arb_common.py — shared helpers for the new market_line_arbiter suite.
 # ===============================================================
 import cocotb
 from cocotb.clock import Clock
