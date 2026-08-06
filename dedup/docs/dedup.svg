@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640">
+  <rect width="1000" height="640" fill="#ffffff"/>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#111111"/>
+    </marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#777777"/>
+    </marker>
+  </defs>
+
+  <style>
+    .blk   { fill:none; stroke:#111111; stroke-width:1.6; }
+    .name  { font-family:"DejaVu Sans Mono",monospace; font-size:17px; fill:#111111; }
+    .sub   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:13px; fill:#444444; }
+    .lbl   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:13px; fill:#111111; }
+    .lblg  { font-family:"DejaVu Sans",Arial,sans-serif; font-size:13px; fill:#777777; }
+    .data  { fill:none; stroke:#111111; stroke-width:1.6; marker-end:url(#ar); }
+    .ctrl  { fill:none; stroke:#777777; stroke-width:1.4; marker-end:url(#arg); }
+    .plain { fill:none; stroke:#777777; stroke-width:1.4; }
+    .title { font-family:"DejaVu Sans Mono",monospace; font-size:20px; fill:#111111; }
+  </style>
+
+  <text class="title" x="40" y="44">DEDUP</text>
+
+  <!-- completed_seq input -->
+  <text class="lblg" x="40" y="288">completed_seq</text>
+  <text class="lblg" x="40" y="306">(from CHECKSUM)</text>
+  <path class="plain" d="M40,320 L215,320"/>
+  <circle cx="215" cy="320" r="4.5" fill="#777777"/>
+
+  <!-- fork: up and across to the tree (same-cycle bypass) -->
+  <path class="ctrl" d="M215,320 L215,120 L695,120"/>
+  <text class="lblg" x="420" y="110">same-cycle bypass</text>
+
+  <!-- fork: into CPT -->
+  <path class="ctrl" d="M215,320 L265,320"/>
+
+  <!-- CPT -->
+  <rect class="blk" x="270" y="268" width="210" height="104"/>
+  <text class="name" x="375" y="308" text-anchor="middle">CPT</text>
+  <text class="sub"  x="375" y="330" text-anchor="middle">completed packets table</text>
+  <text class="sub"  x="375" y="350" text-anchor="middle">circular, DEPTH=8</text>
+  <path class="ctrl" d="M480,320 L695,320"/>
+
+  <!-- SEQ_REGS -->
+  <rect class="blk" x="270" y="420" width="210" height="104"/>
+  <text class="name" x="375" y="460" text-anchor="middle">SEQ_REGS</text>
+  <text class="sub"  x="375" y="482" text-anchor="middle">one seq per feed,</text>
+  <text class="sub"  x="375" y="502" text-anchor="middle">written at SOP</text>
+  <path class="ctrl" d="M480,472 L695,472"/>
+
+  <!-- feed inputs -->
+  <text class="lbl" x="40" y="574">N feeds in</text>
+  <path class="data" d="M40,590 L695,590"/>
+  <circle cx="375" cy="590" r="4.5" fill="#111111"/>
+  <path class="ctrl" d="M375,590 L375,529"/>
+
+  <!-- comparator tree -->
+  <rect class="blk" x="700" y="90" width="150" height="520"/>
+  <text class="name" x="775" y="342" text-anchor="middle">COMPARATOR</text>
+  <text class="name" x="775" y="364" text-anchor="middle">TREE</text>
+
+  <!-- output -->
+  <path class="data" d="M850,350 L960,350"/>
+  <text class="lbl" x="866" y="336">N feeds out</text>
+</svg>
