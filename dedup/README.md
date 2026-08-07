@@ -61,7 +61,50 @@ flops every port of the block so that the combinational datapath becomes a real
 timed path. Those flops exist only for the measurement and are not part of the
 design.
 
-## Verification [PENDING]
+## Verification
+
+21 tests under `verification/`, run with cocotb against Verilator:
+
+```
+cd verification && make
+```
+
+Directed coverage:
+
+- **Passthrough.** An empty table, and a populated table holding sequence
+  numbers that never match, both leave every beat untouched.
+- **Drop.** A completed packet's later copy is dropped, on one feed and on all
+  feeds at once.
+- **Same-cycle bypass.** A copy arriving in the very cycle its completion
+  arrives is dropped before the table write is visible, and the entry then
+  persists into the table.
+- **Both paths together.** One feed matching a table entry and another matching
+  the live completion in the same cycle, with a third feed matching neither.
+- **Table.** A completion is written whether or not it matched anything that
+  cycle, the write pointer advances cleanly across a full table, and one
+  completion past full evicts the oldest entry.
+- **Bounded window.** A straggler whose sequence number has been evicted passes
+  through, asserted as intended behaviour so a future change to the eviction
+  policy has to be deliberate.
+- **Mid packet kill.** A feed streaming a packet that completes elsewhere is
+  cut off from that cycle on, its following packet is unaffected, and a second
+  feed carrying a different packet is untouched.
+- **Flow control.** `in_ready` follows `out_ready` per feed and does not move
+  when a copy is dropped, stalling one feed leaves the others streaming, and a
+  SOP presented while ready is low does not update that feed's `seq_regs`.
+
+Constrained random runs two regimes against a cycle accurate golden model that
+checks `out_valid`, `in_ready` and `out_seq` every cycle: a wide sequence pool
+where most traffic passes, and a pool of six where nearly everything collides
+and the table stays saturated.
+
+The suite was mutation checked. Removing the same-cycle bypass fails 7 tests,
+dropping the `in_ready` qualifier on the `seq_regs` write fails 4, and pinning
+the table write to entry 0 fails 5.
+
+Waveforms are off by default because tracing the long random tests segfaults
+Verilator 5.036. Enable them on a short run with
+`make TRACE=1 MODULE=test_midpacket`.
 
 ## Layout
 
@@ -74,5 +117,14 @@ dedup/
 │   └── dedup_sta_harness.sv         # synthesis harness, not design RTL
 ├── docs/
 │   └── dedup.svg                    # block diagram
-└── verification/                    # [PENDING]
+└── verification/
+    ├── Makefile
+    ├── dedup_tb_wrap.sv             # flattens the packed ports for cocotb
+    ├── dedup_common.py              # driver, sampler and golden model
+    ├── test_passthrough.py
+    ├── test_dedup_core.py
+    ├── test_cpt.py
+    ├── test_midpacket.py
+    ├── test_backpressure.py
+    └── test_random.py
 ```
