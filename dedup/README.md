@@ -98,10 +98,6 @@ checks `out_valid`, `in_ready` and `out_seq` every cycle: a wide sequence pool
 where most traffic passes, and a pool of six where nearly everything collides
 and the table stays saturated.
 
-The suite was mutation checked. Removing the same-cycle bypass fails 7 tests,
-dropping the `in_ready` qualifier on the `seq_regs` write fails 4, and pinning
-the table write to entry 0 fails 5.
-
 Waveforms are off by default because tracing the long random tests segfaults
 Verilator 5.036. Enable them on a short run with
 `make TRACE=1 MODULE=test_midpacket`.
