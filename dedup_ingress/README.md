@@ -2,7 +2,8 @@
 
 The **dedup_ingress** block drops redundant copies of packets that have already been
 confirmed complete downstream. It is the first stage of the `udp_parser`
-pipeline, sitting between the incoming feeds and `feed_buffer`.
+pipeline, sitting between the incoming feeds and `feed_buffer`. A second block,
+`dedup_egress`, makes the final cut at the other end of the pipeline.
 
 ## Context
 
@@ -26,7 +27,9 @@ the pipeline.
 - **Completed packets table.** Completions arriving on `cmpl_valid` and
   `cmpl_seq` are written into a circular table of parameterised depth. The
   oldest entry is overwritten once the table has wrapped. There is no full
-  condition and the block never stalls.
+  condition and the block never stalls. A completion whose sequence number the
+  table already holds is not written again: a packet can complete more than
+  once, and rewriting it would evict a different, still useful entry.
 - **Comparator tree.** Every cycle, each feed's current sequence number is
   compared against every table entry and against the completion arriving that
   same cycle. The same-cycle path catches a copy whose completion has not yet
@@ -50,7 +53,7 @@ through. That is a known limit of the window size.
 ## Timing
 
 - Synthesised for **Xilinx Kintex-7 `xc7k160tffg676-3`** at **325 MHz**.
-- **WNS +0.513 ns** post synthesis.
+- **WNS +0.179 ns** post synthesis.
 - Worst path runs from the input data through the comparator tree to
   `out_valid`, 7 logic levels.
 
@@ -63,7 +66,7 @@ design.
 
 ## Verification
 
-21 tests under `verification/`, run with cocotb against Verilator:
+23 tests under `verification/`, run with cocotb against Verilator:
 
 ```
 cd verification && make
@@ -83,6 +86,9 @@ Directed coverage:
 - **Table.** A completion is written whether or not it matched anything that
   cycle, the write pointer advances cleanly across a full table, and one
   completion past full evicts the oldest entry.
+- **Repeated completion.** A completion the table already holds evicts nothing
+  and does not move the write pointer, checked separately so a write that is
+  skipped but still advances the pointer is caught.
 - **Bounded window.** A straggler whose sequence number has been evicted passes
   through, asserted as intended behaviour so a future change to the eviction
   policy has to be deliberate.
@@ -97,6 +103,9 @@ Constrained random runs two regimes against a cycle accurate golden model that
 checks `out_valid`, `in_ready` and `out_seq` every cycle: a wide sequence pool
 where most traffic passes, and a pool of six where nearly everything collides
 and the table stays saturated.
+
+The suite was mutation checked. Making the completion write unconditional fails
+4 tests: both repeated completion tests and both random regimes.
 
 Waveforms are off by default because tracing the long random tests segfaults
 Verilator 5.036. Enable them on a short run with

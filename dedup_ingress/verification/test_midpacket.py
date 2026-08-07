@@ -2,8 +2,8 @@
 
 A feed is part way through streaming a packet when that packet completes on
 another feed. From that cycle on its remaining beats are dropped, leaving a
-partial copy downstream. FEED_BUFFER discards those orphaned beats on the same
-completion feedback, which is outside this block.
+partial copy downstream. Those orphaned beats are not recalled: they are served
+like any others and dropped at DEDUP_EGRESS, which is outside this block.
 
 This is the case that proves the seq register works: the beats after SOP carry
 no sequence number of their own, so the only way they can be matched is from

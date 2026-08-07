@@ -36,7 +36,7 @@ feed's copy was abandoned, not that the packet was delivered. If DEDUP_INGRESS d
 that sequence number on every feed, a healthy copy on another line would be
 discarded with it, and a packet that was still recoverable would be lost.
 Invalidation stays scoped to the feed it happened on, and `feed_buffer` handles
-it.
+it with a sticky per feed drop.
 
 DEDUP_INGRESS does not reorder and does not buffer. It never stalls on its own account:
 no internal condition, full table included, ever holds up a feed. It does pass
@@ -85,8 +85,8 @@ Each feed is an independent stream with its own handshake. There is no shared
 port and no arbitration.
 
 `out_seq` is produced so that no block downstream has to parse the header
-again. `feed_buffer` needs it to know which held beats to flush when a
-completion arrives.
+again. Every stage behind this one carries it through to `dedup_egress`, which
+needs it to make the final drop decision.
 
 ### Environment assumption
 
@@ -134,9 +134,26 @@ The CPT holds the sequence numbers of the last `CPT_DEPTH` confirmed packets.
 It has three pieces of state: `cpt_seq`, the sequence numbers, `cpt_occupied`,
 one bit per entry, and `cpt_wr_ptr`, the write pointer.
 
-A completion always writes. The pointer advances and wraps at `CPT_DEPTH`, so
-the oldest entry is overwritten once the table is full. There is no full
-condition, and nothing waits.
+A completion writes unless its sequence number is already held. The pointer
+advances and wraps at `CPT_DEPTH`, so the oldest entry is overwritten once the
+table is full. There is no full condition, and nothing waits.
+
+The suppression exists because a packet can complete more than once. A copy
+that got past this block before its twin completed is still buffered, still
+served by the arbiter, and still checksummed, so CHECKSUM raises a second
+completion for a sequence number the table already holds. Writing it again
+would consume an entry and evict a different, still useful value, shortening
+the window for no gain. `cmpl_present` is a separate comparison from the drop
+decision: that one compares each feed's `seq_sel`, this one compares
+`cmpl_seq`.
+
+```
+cmpl_match[e] = cpt_occupied[e] && (cpt_seq[e] == cmpl_seq);
+cmpl_present  = |cmpl_match;
+```
+
+When `cmpl_present` is high the write is skipped and `cpt_wr_ptr` does not
+move.
 
 ### Comparator tree
 
@@ -205,8 +222,20 @@ land in `feed_buffer`. On beat 3, another feed's copy of packet 100 completes.
 From that cycle `seq_sel[0]` matches, so beat 3 and everything after it is
 dropped.
 
-That leaves beats 1 and 2 sitting in `feed_buffer` with no EOP coming.
-`feed_buffer` flushes them using the same completion feedback.
+That leaves beats 1 and 2 sitting in `feed_buffer` with no EOP coming. They are
+not recalled. `feed_buffer` holds no completed packets table and takes no
+completion feedback, so those beats are served like any others. The arbiter
+forwards them, then waits for an EOP that never comes, gives up after
+`HICCUP_CYCLES`, and moves on. The beats themselves are dropped at
+`dedup_egress`, which sees a sequence number that has already completed.
+
+The cost of this is the arbiter's hiccup timeout, paid once per mid packet
+kill. The alternative, acting on completions inside `feed_buffer`, was
+rejected: a completion always arrives after the decision to forward has been
+made, so `feed_buffer` would either have to cut a packet in half, leaving the
+arbiter holding a fragment with nothing behind it to clean up, or commit at SOP
+and let the rest through anyway. Section 5 of the system level document covers
+this.
 
 The arbiter cannot do this. `invalidate_feed` only fires for the feed the
 arbiter is serving. Here it may never have selected feed 0 at all.
@@ -307,14 +336,14 @@ not to the design, and the harness is not part of the pipeline.
 
 ### Result
 
-WNS +0.513 ns post synthesis.
+WNS +0.179 ns post synthesis.
 
 Worst path:
 
 ```
-Source:       in_data_q_reg[0][3]/C
+Source:       in_data_q_reg[0][4]/C
 Destination:  out_valid_reg[0]/D
-Data Path Delay: 2.425 ns  (logic 0.971 ns, route 1.454 ns)
+Data Path Delay: 2.759 ns  (logic 0.977 ns, route 1.782 ns)
 Logic Levels: 7  (CARRY4=3, LUT3=1, LUT4=1, LUT5=1, LUT6=1)
 ```
 
@@ -323,10 +352,23 @@ comparator tree, through the drop decision, to `out_valid`. This is the path
 predicted to be critical, and it is. The three CARRY4s are the equality
 comparators, which Vivado maps onto the carry chain rather than LUTs.
 
+### What the completion comparison cost
+
+Before `cmpl_present` was added the same path measured WNS +0.513 ns, with a
+data path delay of 2.425 ns (logic 0.971 ns, route 1.454 ns). The logic barely
+moved. The whole 0.334 ns went into routing.
+
+The reason is fanout. Every `cpt_seq` bit used to drive `N_FEEDS` comparators.
+It now drives `N_FEEDS + 1`, because `cmpl_present` reads the same registers.
+More loads on a net means a longer estimated route, and those nets sit on the
+critical path. The new comparison never becomes critical itself; it makes the
+existing path more expensive to reach.
+
 ### If depth grows
 
-The margin is 0.513 ns on a 3.077 ns period. Raising `CPT_DEPTH` widens the
-tree and eats into it.
+The margin is 0.179 ns on a 3.077 ns period. Raising `CPT_DEPTH` widens the
+tree and eats into it, both through the extra comparators and through the
+higher fanout on `cpt_seq`.
 
 If it stops closing, the cut goes between the comparators and the OR reduction,
 which costs one cycle of latency through the block. It does not go into the
@@ -334,7 +376,7 @@ ready path: `in_ready` must stay independent of the tree.
 
 ## 7. Verification
 
-21 tests under `verification/`, run with cocotb against Verilator:
+23 tests under `verification/`, run with cocotb against Verilator:
 
 ```
 cd verification && make
@@ -368,6 +410,15 @@ surviving.
 **Table.** A completion is written whether or not it matched anything that
 cycle. The write pointer advances cleanly across a full table. One completion
 past full evicts the oldest entry, and everything newer is still held.
+
+**Repeated completion.** A completion whose sequence number the table already
+holds evicts nothing, and does not move the write pointer. The two are separate
+failures and get a test each. The first fills the table, repeats the newest
+entry three times, and checks every original is still held. The second fills the
+table, repeats the newest entry once, then completes one genuinely new sequence
+number, and checks that exactly one eviction happened rather than two. A write
+that was skipped but still advanced the pointer passes the first test and fails
+the second.
 
 **Late copy.** A copy whose sequence number has been evicted passes through.
 Asserted as intended behaviour, so a future change to the eviction policy has

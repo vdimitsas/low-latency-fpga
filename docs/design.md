@@ -52,13 +52,19 @@ The buffer is bypassed when it is not needed. If a feed's FIFO is empty and the 
 
 FEED_BUFFER makes no selection decisions and has no knowledge of why the arbiter is or is not ready. It sees only readiness on its output, presents what it holds, and lets the arbiter choose.
 
-Two inputs let the buffer discard data it no longer needs to hold. The arbiter drives an invalidate vector, one bit per feed, when it gives up on a stalled feed mid-packet: the buffer then clears that feed's remaining beats so the abandoned packet's tail is never forwarded as a fragment. Separately, the completion feedback from CHECKSUM tells the buffer which packets have already been served successfully, so it can drop copies of those packets still sitting in the other feeds' FIFOs.
+One input lets the buffer discard data it no longer needs to hold. The arbiter drives an invalidate vector, one bit per feed, when it gives up on a stalled feed mid-packet. The buffer sets a sticky bit on that feed and drops what arrives after it, so the abandoned packet's tail is never forwarded as a fragment. The bit clears on an EOP beat, which is the end of that abandoned tail, or on the next SOP, which is a fresh packet and is accepted normally. Both conditions are needed: the tail may never arrive at all, and without the SOP condition a healthy packet queued behind it would be swallowed.
+
+FEED_BUFFER takes no completion feedback and holds no table of completed packets. It is storage and flow control only. Duplicate removal happens at the two ends of the pipeline, in DEDUP_INGRESS and DEDUP_EGRESS, and the reasoning for that split is in section 5.
 
 Latency through this stage is a range rather than a fixed number: minimum on the bypass path, and bounded above by FIFO depth and how long a feed waits to be served.
 
 MARKET_LINE_ARBITER picks which feed goes downstream, keeps that choice for the whole packet, and gives up on a feed that goes quiet in the middle of a packet for a parameterisable number of cycles. When it gives up, it sends an invalidate vector to FEED_BUFFER, one bit per feed, telling it to clear what is left of that packet so the leftover part is never sent on as a fragment.
 
 CHECKSUM validates the served packet. Its result is the definition of success for the pipeline: a packet is only complete once its checksum passes, which is why the completion feedback originates here rather than at the arbiter.
+
+CHECKSUM restarts its accumulator on any SOP, not only on the SOP that follows an EOP. This matters because the arbiter can forward a fragment. A packet killed mid-flight by DEDUP_INGRESS leaves beats in FEED_BUFFER with no EOP behind them, and the arbiter serves those beats and then continues into the next packet on that feed. Restarting on SOP means the fragment is abandoned the moment the next real packet begins, so the packet behind it is checksummed on its own. The fragment never reaches an EOP, so it never produces a completion.
+
+DEDUP_EGRESS is the last stage before the output. It holds the same kind of table as DEDUP_INGRESS and drops any beat whose sequence number has already completed. Two things reach it: fragments of packets killed upstream, and whole copies that were already being drained from FEED_BUFFER when their twin completed. Neither can be stopped earlier, because the completion always arrives after the decision to forward has been made. Like DEDUP_INGRESS it needs no drop state, because every beat carries its own sequence number: a fragment's beats match the table and die, and the next packet's beats carry a different sequence number and pass.
 
 Satellite logic
 
@@ -68,7 +74,9 @@ It does not wait for the new copy to be validated first. Waiting for CHECKSUM to
 
 TIMER starts counting when a checksum fails. It gives the pipeline a set number of cycles to receive a good copy of that packet. If no good copy arrives in time, the timer stops waiting and an error is reported downstream. The number of cycles is a parameter.
 
-Completion feedback runs from CHECKSUM back to DEDUP_INGRESS and FEED_BUFFER. It tells them a packet has been served successfully. DEDUP_INGRESS uses it to drop later copies of that packet, and FEED_BUFFER uses it to release copies it is still holding.
+Completion feedback runs from CHECKSUM back to DEDUP_INGRESS, and forward to DEDUP_EGRESS. It tells them a packet has been served successfully, so later copies of it can be dropped.
+
+DEDUP_INGRESS does not write a completion whose sequence number its table already holds. A packet can complete more than once, because a copy that got past the front of the pipeline before its twin completed is still served and still checksummed. Writing the same value twice would consume an entry and evict a different, still useful sequence number, shortening the window for nothing.
 
 Number of feeds
 
@@ -116,6 +124,10 @@ Duplicate detection is driven by downstream confirmation, not by a watermark. [1
 
 This design instead holds a bounded table of recently completed sequence numbers and compares against all of them in parallel. It costs more comparators and can miss a very late copy, but an out-of-order packet passes through untouched with no buffer and no stall. More significantly, the table is written by the completion feedback from CHECKSUM, not by what the pipeline has forwarded. Forwarding a copy is not the same as delivering it: a copy that fails its checksum was worthless, and a copy abandoned mid-packet by the arbiter was never delivered at all. Only a passing checksum confirms a packet is finished, which is why DEDUP_INGRESS acts on completion feedback and deliberately ignores the arbiter's invalidate vector.
 
+Duplicate removal happens at both ends, not in the middle. The completion feedback is the only thing that says a packet was truly delivered, and it necessarily arrives after the pipeline has already decided to forward. A copy can therefore be part way through FEED_BUFFER, or already served by the arbiter, when its twin completes. Acting on that inside FEED_BUFFER would mean either cutting a packet in half, which leaves the arbiter holding a fragment with nobody left to clean it up, or committing to the packet at SOP and letting the rest through anyway.
+
+So this design does not try. FEED_BUFFER carries no completed packets table at all. DEDUP_INGRESS drops what it can at the front, where a mid-packet kill is safe because stages behind it can absorb the fragment, and DEDUP_EGRESS drops the remainder at the very end, where a packet is whole and there is nothing left to corrupt. The cost is that a duplicate caught only at the tail has consumed arbiter and checksum cycles on its way through. The gain is that no stage in the middle has to reason about a decision that arrives too late to act on cleanly.
+
 Feeds stay independent until the arbiter. Published designs merge into a single stream at the front. Here every feed remains its own stream with its own handshake through DEDUP_INGRESS, and they converge only at MARKET_LINE_ARBITER. This is what allows DEDUP_INGRESS to pass readiness straight through per feed with no skid buffer and no contention, so no feed can head-of-line block another. The cost is one output port and one set of comparators per feed.
 
 Scope
@@ -152,7 +164,7 @@ Integration. Once several stages exist, they will be verified together end to en
 
 8. Future work
 
-Remaining stages. CHECKSUM, FIX_TRACKER and TIMER are specified but not implemented. Each will be built the same way as the stages already done: designed, verified against a golden model, and timing closed on its own before integration. End to end verification of the assembled pipeline follows after that.
+Remaining stages. CHECKSUM, DEDUP_EGRESS, FIX_TRACKER and TIMER are specified but not implemented. Each will be built the same way as the stages already done: designed, verified against a golden model, and timing closed on its own before integration. End to end verification of the assembled pipeline follows after that.
 
 Feed count coverage. The verification suites currently run at four feeds. Running them across other values is needed before the design can be called parameterisable in feed count.
 

@@ -201,8 +201,9 @@ module dedup_ingress #(
     // withhold valid on a feed whose seq matches a completed packet.
     //
     // A drop can land mid packet: a copy already partly forwarded is killed
-    // the moment its seq completes on another feed. FEED_BUFFER discards the
-    // orphaned beats on the same completion feedback.
+    // the moment its seq completes on another feed. The beats already past
+    // this block are not recalled. They are served like any others and die at
+    // DEDUP_EGRESS, which drops anything whose seq has already completed.
     // -------------------------------------------------------------------------
     always_comb begin
         for (int f = 0; f < N_FEEDS; f++) begin
