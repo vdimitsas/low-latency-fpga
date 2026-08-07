@@ -108,9 +108,15 @@ class GoldenDedupIngress:
                 self.seq_regs[f] = seq_from_beat(in_data[f])
 
         if cmpl_valid:
-            self.cpt_seq[self.cpt_wr_ptr] = cmpl_seq & SEQ_MASK
-            self.cpt_occupied[self.cpt_wr_ptr] = 1
-            self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
+            seq = cmpl_seq & SEQ_MASK
+            already_held = any(
+                self.cpt_occupied[e] and self.cpt_seq[e] == seq
+                for e in range(self.cpt_depth)
+            )
+            if not already_held:
+                self.cpt_seq[self.cpt_wr_ptr] = seq
+                self.cpt_occupied[self.cpt_wr_ptr] = 1
+                self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
 
 
 class DedupIngressTB:

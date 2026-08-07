@@ -134,19 +134,45 @@ module dedup_ingress #(
     end
 
     // -------------------------------------------------------------------------
+    // completion already held
+    //
+    // A packet can complete more than once. A copy that got past this block
+    // before its twin completed is still served by the arbiter and still
+    // checksummed, so CHECKSUM raises a second completion for a sequence
+    // number the table already holds.
+    //
+    // Writing it again would consume an entry and evict a different, still
+    // useful sequence number, shortening the window for no gain. So the write
+    // is suppressed when the value is already present.
+    //
+    // This is a separate comparison from the drop decision: that one compares
+    // each feed's seq_sel, this one compares cmpl_seq. CPT_DEPTH equality
+    // comparisons of SEQ_W bits, on the completion path only.
+    // -------------------------------------------------------------------------
+    logic [CPT_DEPTH-1:0] cmpl_match;
+    logic                 cmpl_present;
+
+    always_comb begin
+        for (int e = 0; e < CPT_DEPTH; e++) begin
+            cmpl_match[e] = cpt_occupied[e] && (cpt_seq[e] == cmpl_seq);
+        end
+        cmpl_present = |cmpl_match;
+    end
+
+    // -------------------------------------------------------------------------
     // completed packets table
     //
-    // Circular. A completion always writes, overwriting the oldest entry once
-    // the table has wrapped. There is no full condition and nothing ever
-    // stalls: the table is a bounded window of recent completions, not a
-    // guaranteed record.
+    // Circular. A completion carrying a sequence number not already held
+    // writes, overwriting the oldest entry once the table has wrapped. There
+    // is no full condition and nothing ever stalls: the table is a bounded
+    // window of recent completions, not a guaranteed record.
     // -------------------------------------------------------------------------
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cpt_seq      <= '0;
             cpt_occupied <= '0;
             cpt_wr_ptr   <= '0;
-        end else if (cmpl_valid) begin
+        end else if (cmpl_valid && !cmpl_present) begin
             cpt_seq[cpt_wr_ptr]      <= cmpl_seq;
             cpt_occupied[cpt_wr_ptr] <= 1'b1;
 
