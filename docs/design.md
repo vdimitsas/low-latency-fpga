@@ -40,7 +40,7 @@ Parameterisation. Feed count, data and sequence widths, and timing thresholds ar
 
 The parser is organised as a chain of independent stages, each with a single responsibility. Data flows left to right through the main path, with two satellite blocks handling retry logic and a feedback path closing the loop back to the front of the pipeline.
 
-Pipeline architecture
+![Pipeline architecture](images/pipeline.svg)
 
 Stages
 
