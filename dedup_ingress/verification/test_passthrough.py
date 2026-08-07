@@ -8,13 +8,13 @@
 
 import cocotb
 
-from dedup_common import DedupTB, N_FEEDS, send_packet
+from dedup_ingress_common import DedupIngressTB, N_FEEDS, send_packet
 
 
 @cocotb.test()
 async def test_empty_cpt_passes_everything(dut):
     """1. Nothing has completed, so nothing may be dropped."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     for feed in range(N_FEEDS):
@@ -33,7 +33,7 @@ async def test_empty_cpt_passes_everything(dut):
 @cocotb.test()
 async def test_completions_that_never_match(dut):
     """7. A populated CPT must not drop unrelated sequence numbers."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     for seq in (0x10, 0x11, 0x12, 0x13):
@@ -54,7 +54,7 @@ async def test_completions_that_never_match(dut):
 @cocotb.test()
 async def test_all_feeds_in_parallel(dut):
     """1b. Four distinct packets in flight at once, none of them dropped."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     for beat in range(4):

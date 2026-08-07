@@ -1,21 +1,21 @@
 // -----------------------------------------------------------------------------
-// dedup_sta_harness
+// dedup_ingress_sta_harness
 //
 // Synthesis harness. NOT design RTL and NOT part of the pipeline.
 //
-// dedup is a cut-through block: its datapath runs from input port to output
-// port with no register in between. A standalone synthesis of dedup therefore
+// dedup_ingress is a cut-through block: its datapath runs from input port to output
+// port with no register in between. A standalone synthesis of dedup_ingress therefore
 // contains no register to register path through the comparator tree, so STA
 // has nothing to time and reports only the CPT bookkeeping logic.
 //
-// This harness flops every input and every output of dedup. That turns the
+// This harness flops every input and every output of dedup_ingress. That turns the
 // combinational datapath into a real register to register path, so STA
 // measures the logic depth of the block itself with no assumed I/O budget.
 //
 // The flops here are an artefact of the measurement, not of the design.
 // -----------------------------------------------------------------------------
 
-module dedup_sta_harness #(
+module dedup_ingress_sta_harness #(
     parameter int N_FEEDS    = 4,
     parameter int DATA_W     = 64,
     parameter int SEQ_W      = 32,
@@ -83,13 +83,13 @@ module dedup_sta_harness #(
     logic [N_FEEDS-1:0]             dut_out_eop;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  dut_out_seq;
 
-    dedup #(
+    dedup_ingress #(
         .N_FEEDS    (N_FEEDS),
         .DATA_W     (DATA_W),
         .SEQ_W      (SEQ_W),
         .SEQ_OFFSET (SEQ_OFFSET),
         .CPT_DEPTH  (CPT_DEPTH)
-    ) u_dedup (
+    ) u_dedup_ingress (
         .clk        (clk),
         .rst_n      (rst_n),
 

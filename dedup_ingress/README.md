@@ -1,6 +1,6 @@
-# dedup
+# dedup_ingress
 
-The **dedup** block drops redundant copies of packets that have already been
+The **dedup_ingress** block drops redundant copies of packets that have already been
 confirmed complete downstream. It is the first stage of the `udp_parser`
 pipeline, sitting between the incoming feeds and `feed_buffer`.
 
@@ -54,9 +54,9 @@ through. That is a known limit of the window size.
 - Worst path runs from the input data through the comparator tree to
   `out_valid`, 7 logic levels.
 
-Because the datapath is cut-through, a standalone synthesis of `dedup` contains
+Because the datapath is cut-through, a standalone synthesis of `dedup_ingress` contains
 no register to register path through the comparator tree and STA has nothing to
-time. The number above is measured through `sta/dedup_sta_harness.sv`, which
+time. The number above is measured through `sta/dedup_ingress_sta_harness.sv`, which
 flops every port of the block so that the combinational datapath becomes a real
 timed path. Those flops exist only for the measurement and are not part of the
 design.
@@ -105,20 +105,20 @@ Verilator 5.036. Enable them on a short run with
 ## Layout
 
 ```
-dedup/
+dedup_ingress/
 ├── README.md
 ├── rtl/
-│   └── dedup.sv                     # the dedup RTL
+│   └── dedup_ingress.sv                     # the dedup_ingress RTL
 ├── sta/
-│   └── dedup_sta_harness.sv         # synthesis harness, not design RTL
+│   └── dedup_ingress_sta_harness.sv         # synthesis harness, not design RTL
 ├── docs/
-│   └── dedup.svg                    # block diagram
+│   └── dedup_ingress.svg                    # block diagram
 └── verification/
     ├── Makefile
-    ├── dedup_tb_wrap.sv             # flattens the packed ports for cocotb
-    ├── dedup_common.py              # driver, sampler and golden model
+    ├── dedup_ingress_tb_wrap.sv             # flattens the packed ports for cocotb
+    ├── dedup_ingress_common.py              # driver, sampler and golden model
     ├── test_passthrough.py
-    ├── test_dedup_core.py
+    ├── test_dedup_ingress_core.py
     ├── test_cpt.py
     ├── test_midpacket.py
     ├── test_backpressure.py

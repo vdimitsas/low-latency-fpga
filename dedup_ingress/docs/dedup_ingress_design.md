@@ -1,8 +1,8 @@
-# dedup, Microarchitecture
+# dedup_ingress, Microarchitecture
 
 ## 1. Purpose and scope
 
-This document describes the microarchitecture of `dedup`, the component within
+This document describes the microarchitecture of `dedup_ingress`, the component within
 the UDP market-data parser that drops redundant copies of packets already
 confirmed downstream.
 
@@ -22,23 +22,23 @@ times. Only the first copy to get through is useful. Every later copy is dead
 weight, and if it reaches the rest of the pipeline it wastes bandwidth in
 `feed_buffer`, competes for the arbiter, and is checksummed for nothing.
 
-DEDUP removes those copies. It sits at the front of the pipeline, between the
+DEDUP_INGRESS removes those copies. It sits at the front of the pipeline, between the
 incoming feeds and `feed_buffer`, and it is the only block that knows a packet
 has already been delivered.
 
 A packet counts as delivered when CHECKSUM confirms it. That is the single
-source of truth, and it is the only feedback DEDUP acts on. A copy whose
+source of truth, and it is the only feedback DEDUP_INGRESS acts on. A copy whose
 sequence number matches a confirmed packet is dropped. Everything else passes
 through untouched.
 
-DEDUP does not act on the arbiter's `invalidate_feed`. Invalidation means one
-feed's copy was abandoned, not that the packet was delivered. If DEDUP dropped
+DEDUP_INGRESS does not act on the arbiter's `invalidate_feed`. Invalidation means one
+feed's copy was abandoned, not that the packet was delivered. If DEDUP_INGRESS dropped
 that sequence number on every feed, a healthy copy on another line would be
 discarded with it, and a packet that was still recoverable would be lost.
 Invalidation stays scoped to the feed it happened on, and `feed_buffer` handles
 it.
 
-DEDUP does not reorder and does not buffer. It never stalls on its own account:
+DEDUP_INGRESS does not reorder and does not buffer. It never stalls on its own account:
 no internal condition, full table included, ever holds up a feed. It does pass
 backpressure through, so when `out_ready` goes low on a feed, that feed's
 `in_ready` follows and upstream is held off. It has no view of packet order or
@@ -99,10 +99,10 @@ added to that path, it must be revisited.
 
 ## 3. Microarchitecture
 
-DEDUP has three parts: sequence extraction with the per-feed context
+DEDUP_INGRESS has three parts: sequence extraction with the per-feed context
 registers, the completed packets table, and the comparator tree.
 
-![DEDUP block diagram](dedup.svg)
+![DEDUP_INGRESS block diagram](dedup_ingress.svg)
 
 ### Sequence extraction and `seq_regs`
 
@@ -166,7 +166,7 @@ There is no register between input and output. `out_data`, `out_sop` and
 `out_eop` are the input signals, unchanged. `out_seq` is `seq_sel`. A beat
 presented on `in_data[f]` appears on `out_data[f]` in the same cycle.
 
-The only thing DEDUP does to the stream is withhold `out_valid[f]` when that
+The only thing DEDUP_INGRESS does to the stream is withhold `out_valid[f]` when that
 feed's copy is being dropped:
 
 ```
@@ -223,11 +223,11 @@ look at it.
 
 ### Completions, not invalidation
 
-DEDUP acts only on CHECKSUM completions. It ignores the arbiter's
+DEDUP_INGRESS acts only on CHECKSUM completions. It ignores the arbiter's
 `invalidate_feed`.
 
 Invalidation means one feed's copy was abandoned. It does not mean the packet
-was delivered. If DEDUP dropped that sequence number everywhere, a healthy copy
+was delivered. If DEDUP_INGRESS dropped that sequence number everywhere, a healthy copy
 on another feed would be discarded with it, and a packet that could still have
 been served would be lost.
 
@@ -268,7 +268,7 @@ happens when `out_ready` is registered, because upstream then acts on stale
 information and commits a beat that has nowhere to go.
 
 Here `out_ready` is combinational and `in_ready` follows it in the same cycle.
-Upstream never commits a beat DEDUP cannot take, so there is nothing to absorb.
+Upstream never commits a beat DEDUP_INGRESS cannot take, so there is nothing to absorb.
 
 If a register is ever added to the ready path, this has to be revisited.
 
@@ -289,7 +289,7 @@ period.
 
 ### Measuring a block with no registers in the datapath
 
-DEDUP's datapath runs from input port to output port with nothing in between. A
+DEDUP_INGRESS's datapath runs from input port to output port with nothing in between. A
 standalone synthesis therefore contains no register to register path through
 the comparator tree, and STA has nothing to time. Running it that way reports
 only the CPT bookkeeping, which is a handful of logic and always passes. The
@@ -299,7 +299,7 @@ The alternative is to constrain the ports with `set_input_delay` and
 `set_output_delay`. That works, but it measures the block against a budget
 chosen by hand, so the answer depends on the numbers picked.
 
-The method used here is `sta/dedup_sta_harness.sv`. It instantiates `dedup` and
+The method used here is `sta/dedup_ingress_sta_harness.sv`. It instantiates `dedup_ingress` and
 puts a register on every input and every output. The combinational datapath
 becomes a real register to register path, so STA measures the logic depth of
 the block itself with no assumed budget. The flops belong to the measurement,
@@ -342,7 +342,7 @@ cd verification && make
 
 ### Golden model
 
-`dedup_common.py` holds a cycle accurate model of the block: the CPT, the write
+`dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT, the write
 pointer, and the per feed sequence registers. Every cycle it is given the same
 stimulus as the DUT and predicts `out_valid`, `in_ready` and `out_seq`. The
 driver compares them on every cycle of every test, directed and random alike,

@@ -1,9 +1,9 @@
-"""Shared helpers for the dedup testbenches.
+"""Shared helpers for the dedup_ingress testbenches.
 
-The DUT is dedup_tb_wrap, which flattens dedup's packed two dimensional ports
+The DUT is dedup_ingress_tb_wrap, which flattens dedup_ingress's packed two dimensional ports
 into single vectors. Feed f lives in bits [f*W : (f+1)*W) of a flat vector.
 
-dedup is cut-through, so its outputs are combinational functions of its inputs.
+dedup_ingress is cut-through, so its outputs are combinational functions of its inputs.
 Every helper here therefore samples outputs late in the cycle, after the inputs
 for that cycle have been driven and the logic has settled.
 """
@@ -58,8 +58,8 @@ def _bits(word, count):
     return [(word >> i) & 1 for i in range(count)]
 
 
-class GoldenDedup:
-    """Reference model of dedup, cycle accurate.
+class GoldenDedupIngress:
+    """Reference model of dedup_ingress, cycle accurate.
 
     Call `evaluate` with the inputs presented during a cycle to get that
     cycle's outputs, then `commit` to advance the state across the clock edge.
@@ -113,13 +113,13 @@ class GoldenDedup:
             self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
 
 
-class DedupTB:
-    """Drives dedup_tb_wrap one cycle at a time."""
+class DedupIngressTB:
+    """Drives dedup_ingress_tb_wrap one cycle at a time."""
 
     def __init__(self, dut):
         self.dut = dut
         self.n_feeds = N_FEEDS
-        self.golden = GoldenDedup()
+        self.golden = GoldenDedupIngress()
         self.clear()
 
     def clear(self):

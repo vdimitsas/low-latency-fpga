@@ -186,7 +186,7 @@ The path sits at the interaction between the `in_ready` computation and skid buf
 
 Two things limit how far this result can be trusted:
 
-Bonded IOB usage is reported at 515 against 400 available on this package, 128.75% over. That only shows up because this run synthesizes the arbiter standalone, with every port at the chip boundary. Inside the full parser it isn't a top-level module, its ports become internal nets to DEDUP, FEED_BUFFER, and CHECKSUM, and the constraint disappears. It does mean this exact device and package cannot host the arbiter as a true standalone top, so what's reported here is a synthesis-only timing and resource check, not a claim that this configuration places and routes as shown.
+Bonded IOB usage is reported at 515 against 400 available on this package, 128.75% over. That only shows up because this run synthesizes the arbiter standalone, with every port at the chip boundary. Inside the full parser it isn't a top-level module, its ports become internal nets to DEDUP_INGRESS, FEED_BUFFER, and CHECKSUM, and the constraint disappears. It does mean this exact device and package cannot host the arbiter as a true standalone top, so what's reported here is a synthesis-only timing and resource check, not a claim that this configuration places and routes as shown.
 
 These are post-synthesis numbers, not post-route. Placement and routing will move them, so this result is a check on the RTL's structure rather than a final figure.
 

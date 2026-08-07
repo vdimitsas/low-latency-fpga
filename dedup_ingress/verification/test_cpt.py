@@ -11,13 +11,13 @@
 
 import cocotb
 
-from dedup_common import CPT_DEPTH, DedupTB
+from dedup_ingress_common import CPT_DEPTH, DedupIngressTB
 
 
 @cocotb.test()
 async def test_completion_is_written_without_a_match(dut):
     """5. No feed is active when the completion arrives, it still lands."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0x1234
@@ -39,7 +39,7 @@ async def test_completion_is_written_without_a_match(dut):
 @cocotb.test()
 async def test_write_pointer_advances(dut):
     """5b. Consecutive completions occupy distinct entries."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seqs = [0x300 + i for i in range(CPT_DEPTH)]
@@ -62,7 +62,7 @@ async def test_write_pointer_advances(dut):
 @cocotb.test()
 async def test_table_wraps_and_evicts_oldest(dut):
     """8. One completion past full pushes the first entry out."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     first = 0x900
@@ -102,7 +102,7 @@ async def test_straggler_outside_the_window(dut):
     exists so that if the eviction policy ever changes, this changes with it
     deliberately rather than silently.
     """
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     straggler = 0xDEAD

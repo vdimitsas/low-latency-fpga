@@ -12,13 +12,13 @@ the value latched at SOP.
 
 import cocotb
 
-from dedup_common import DedupTB, seq_into_beat
+from dedup_ingress_common import DedupIngressTB, seq_into_beat
 
 
 @cocotb.test()
 async def test_kill_mid_packet(dut):
     """The packet dies on beat 2 of 5 and never recovers."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0x6060
@@ -50,7 +50,7 @@ async def test_kill_mid_packet(dut):
 @cocotb.test()
 async def test_next_packet_on_that_feed_is_unaffected(dut):
     """After the kill, the feed must carry its next packet normally."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     dead = 0x6161
@@ -87,7 +87,7 @@ async def test_next_packet_on_that_feed_is_unaffected(dut):
 @cocotb.test()
 async def test_kill_on_one_feed_only(dut):
     """Two feeds carry different packets, only the matching one dies."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     dying = 0x7070

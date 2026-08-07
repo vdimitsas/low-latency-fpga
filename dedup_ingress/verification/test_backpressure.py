@@ -8,13 +8,13 @@
 
 import cocotb
 
-from dedup_common import DedupTB, N_FEEDS, seq_into_beat
+from dedup_ingress_common import DedupIngressTB, N_FEEDS, seq_into_beat
 
 
 @cocotb.test()
 async def test_in_ready_follows_out_ready(dut):
     """10. Per feed, and nothing else feeds into it."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     patterns = [
@@ -43,7 +43,7 @@ async def test_ready_is_independent_of_the_drop(dut):
     reaching in_ready. If the comparator tree ever gets wired into the ready
     path this fails.
     """
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0xAB
@@ -70,7 +70,7 @@ async def test_ready_is_independent_of_the_drop(dut):
 @cocotb.test()
 async def test_stalled_feed_does_not_disturb_others(dut):
     """11. Feed 0 held off, feeds 1 to 3 stream normally."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     for beat in range(4):
@@ -95,7 +95,7 @@ async def test_stalled_feed_does_not_disturb_others(dut):
 @cocotb.test()
 async def test_drop_on_one_feed_does_not_disturb_others(dut):
     """11b. A drop is scoped to the feed it happens on."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     doomed = 0x1A1A
@@ -124,7 +124,7 @@ async def test_seq_latched_only_on_accepted_sop(dut):
     The RTL qualifies the seq_regs write with in_valid && in_ready && in_sop,
     so a beat the block never accepted leaves the context alone.
     """
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     held = 0x3C3C

@@ -10,13 +10,13 @@
 
 import cocotb
 
-from dedup_common import DedupTB, N_FEEDS, send_packet
+from dedup_ingress_common import DedupIngressTB, N_FEEDS, send_packet
 
 
 @cocotb.test()
 async def test_later_copy_is_dropped(dut):
     """2. Completion goes into the table, the next copy is dropped."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0x4321
@@ -43,7 +43,7 @@ async def test_later_copy_is_dropped(dut):
 @cocotb.test()
 async def test_same_cycle_bypass(dut):
     """3. Completion and matching copy in the same cycle."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0x5555
@@ -67,7 +67,7 @@ async def test_same_cycle_bypass(dut):
 @cocotb.test()
 async def test_table_and_bypass_together(dut):
     """4. One feed matches the table, another matches the live completion."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     old_seq = 0x0A0A
@@ -99,7 +99,7 @@ async def test_table_and_bypass_together(dut):
 @cocotb.test()
 async def test_duplicate_on_every_feed(dut):
     """2b. Once completed, the copy is dropped on all feeds at once."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     seq = 0x7777

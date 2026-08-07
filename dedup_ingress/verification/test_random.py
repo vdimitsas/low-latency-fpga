@@ -1,7 +1,7 @@
 """Test 12: constrained random against the golden model.
 
-Every cycle the model in dedup_common predicts out_valid, in_ready and out_seq
-from the same stimulus the DUT sees, and DedupTB.step checks them. This test
+Every cycle the model in dedup_ingress_common predicts out_valid, in_ready and out_seq
+from the same stimulus the DUT sees, and DedupIngressTB.step checks them. This test
 therefore only has to generate traffic worth checking.
 
 The constraints matter more than the volume. Sequence numbers are drawn from a
@@ -14,7 +14,7 @@ import random
 
 import cocotb
 
-from dedup_common import DedupTB, N_FEEDS
+from dedup_ingress_common import DedupIngressTB, N_FEEDS
 
 CYCLES = 3000
 SEQ_POOL = 64
@@ -31,7 +31,7 @@ class FeedState:
 
 @cocotb.test()
 async def test_constrained_random(dut):
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     rnd = random.Random(0xD3D0)
@@ -83,7 +83,7 @@ async def test_constrained_random(dut):
 @cocotb.test()
 async def test_constrained_random_heavy_duplicates(dut):
     """Same shape, but a tiny seq pool so almost everything is a duplicate."""
-    tb = DedupTB(dut)
+    tb = DedupIngressTB(dut)
     await tb.start()
 
     rnd = random.Random(0xBEEF)

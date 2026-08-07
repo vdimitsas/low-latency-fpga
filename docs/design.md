@@ -44,7 +44,7 @@ The parser is organised as a chain of independent stages, each with a single res
 
 Stages
 
-DEDUP sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. It is also where the sequence number is extracted: the field arrives only in the first beat of a packet, so DEDUP slices it out, holds it for the rest of the packet, and presents it alongside every beat it forwards.
+DEDUP_INGRESS sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. It is also where the sequence number is extracted: the field arrives only in the first beat of a packet, so DEDUP_INGRESS slices it out, holds it for the rest of the packet, and presents it alongside every beat it forwards.
 
 FEED_BUFFER provides per-feed FIFO storage. The arbiter serves one feed at a time, so without buffering here the unselected feeds would immediately backpressure their sources. The FIFOs absorb incoming traffic while a feed waits its turn, and backpressure only propagates upstream when a FIFO genuinely fills.
 
@@ -62,13 +62,13 @@ CHECKSUM validates the served packet. Its result is the definition of success fo
 
 Satellite logic
 
-FIX_TRACKER keeps track of packets whose checksum failed. CHECKSUM tells it which packet went bad, and from then on it watches the stream coming out of DEDUP for a fresh copy of that packet. As soon as a copy arrives on any feed, it tells the arbiter to prefer that feed.
+FIX_TRACKER keeps track of packets whose checksum failed. CHECKSUM tells it which packet went bad, and from then on it watches the stream coming out of DEDUP_INGRESS for a fresh copy of that packet. As soon as a copy arrives on any feed, it tells the arbiter to prefer that feed.
 
 It does not wait for the new copy to be validated first. Waiting for CHECKSUM to confirm the replacement would add a full round trip before the arbiter is even told the packet is available, so FIX_TRACKER acts on arrival instead. If the replacement also fails its checksum, CHECKSUM reports the failure again and FIX_TRACKER simply starts watching for the next copy. The process repeats until a good copy gets through or the timer runs out.
 
 TIMER starts counting when a checksum fails. It gives the pipeline a set number of cycles to receive a good copy of that packet. If no good copy arrives in time, the timer stops waiting and an error is reported downstream. The number of cycles is a parameter.
 
-Completion feedback runs from CHECKSUM back to DEDUP and FEED_BUFFER. It tells them a packet has been served successfully. DEDUP uses it to drop later copies of that packet, and FEED_BUFFER uses it to release copies it is still holding.
+Completion feedback runs from CHECKSUM back to DEDUP_INGRESS and FEED_BUFFER. It tells them a packet has been served successfully. DEDUP_INGRESS uses it to drop later copies of that packet, and FEED_BUFFER uses it to release copies it is still holding.
 
 Number of feeds
 
@@ -100,23 +100,23 @@ Several structural choices here match that work, having been arrived at independ
 
 The sequence number field is parameterised by width and byte offset. [1] identifies the same three facts as the minimum needed to retarget an arbitrator between protocols: maximum packet size, sequence number width, and byte position of the sequence number. Their own targets vary widely on the last two, which is why this design carries them as parameters with a compile-time guard rather than fixing them.
 
-Sequence number comparison is the critical path. [1] reports the same, and measures a wider sequence number costing measurably more time. This design sees it in the same place: the worst path in DEDUP runs from the input data through the comparator tree to the output valid, which is why the table depth is a parameter to be swept against static timing analysis rather than chosen up front.
+Sequence number comparison is the critical path. [1] reports the same, and measures a wider sequence number costing measurably more time. This design sees it in the same place: the worst path in DEDUP_INGRESS runs from the input data through the comparator tree to the output valid, which is why the table depth is a parameter to be swept against static timing analysis rather than chosen up front.
 
-Forward first, correct later. The low latency mode in [1] emits a packet before its sequence number has been checked, then discards it once the check fails. Both DEDUP and MARKET_LINE_ARBITER work this way. DEDUP withholds output valid the moment a packet's sequence number matches a completed one, which can happen mid-packet; MARKET_LINE_ARBITER raises its invalidate vector after it has already forwarded part of a packet from a feed it then gives up on. In both cases a downstream stage clears the fragment.
+Forward first, correct later. The low latency mode in [1] emits a packet before its sequence number has been checked, then discards it once the check fails. Both DEDUP_INGRESS and MARKET_LINE_ARBITER work this way. DEDUP_INGRESS withholds output valid the moment a packet's sequence number matches a completed one, which can happen mid-packet; MARKET_LINE_ARBITER raises its invalidate vector after it has already forwarded part of a packet from a feed it then gives up on. In both cases a downstream stage clears the fragment.
 
 The same principle holds at the tail of the pipeline. Beats of the selected packet are passed downstream as they are served, before CHECKSUM has finished computing over the whole packet. Validation therefore confirms a packet that has already left rather than gating its departure, and a failure is handled after the fact by FIX_TRACKER and TIMER. Nothing in the datapath waits for the checksum, which is why the completion feedback is a confirmation and not a permission.
 
 A cycle budget before giving up. The threshold in MARKET_LINE_ARBITER for abandoning a silent feed is the same construct [1] uses to decide how long to hold the output waiting for a missing packet.
 
-A bounded window sized in packets, not cycles. DEDUP's table of completed packets overwrites its oldest entry rather than expiring entries on a timer. [1] gives the same reasoning for preferring count-based windowing to time-based windowing: a count tracks the real rate of incoming data, which varies through the trading day, where a fixed timeout does not. The consequence, that a copy arriving after the window has moved on is not recognised as a duplicate, is common to every windowed arbitrator.
+A bounded window sized in packets, not cycles. DEDUP_INGRESS's table of completed packets overwrites its oldest entry rather than expiring entries on a timer. [1] gives the same reasoning for preferring count-based windowing to time-based windowing: a count tracks the real rate of incoming data, which varies through the trading day, where a fixed timeout does not. The consequence, that a copy arriving after the window has moved on is not recognised as a duplicate, is common to every windowed arbitrator.
 
 Two decisions differ, and are made on their own merits.
 
 Duplicate detection is driven by downstream confirmation, not by a watermark. [1] treats a packet as a duplicate when its sequence number is at or below the next expected one. That is a single comparison and never misses a duplicate, but it assumes ordered arrival, so a genuinely out-of-order packet is discarded as though it were a copy. It is the reason their high reliability mode needs a reordering buffer.
 
-This design instead holds a bounded table of recently completed sequence numbers and compares against all of them in parallel. It costs more comparators and can miss a very late copy, but an out-of-order packet passes through untouched with no buffer and no stall. More significantly, the table is written by the completion feedback from CHECKSUM, not by what the pipeline has forwarded. Forwarding a copy is not the same as delivering it: a copy that fails its checksum was worthless, and a copy abandoned mid-packet by the arbiter was never delivered at all. Only a passing checksum confirms a packet is finished, which is why DEDUP acts on completion feedback and deliberately ignores the arbiter's invalidate vector.
+This design instead holds a bounded table of recently completed sequence numbers and compares against all of them in parallel. It costs more comparators and can miss a very late copy, but an out-of-order packet passes through untouched with no buffer and no stall. More significantly, the table is written by the completion feedback from CHECKSUM, not by what the pipeline has forwarded. Forwarding a copy is not the same as delivering it: a copy that fails its checksum was worthless, and a copy abandoned mid-packet by the arbiter was never delivered at all. Only a passing checksum confirms a packet is finished, which is why DEDUP_INGRESS acts on completion feedback and deliberately ignores the arbiter's invalidate vector.
 
-Feeds stay independent until the arbiter. Published designs merge into a single stream at the front. Here every feed remains its own stream with its own handshake through DEDUP, and they converge only at MARKET_LINE_ARBITER. This is what allows DEDUP to pass readiness straight through per feed with no skid buffer and no contention, so no feed can head-of-line block another. The cost is one output port and one set of comparators per feed.
+Feeds stay independent until the arbiter. Published designs merge into a single stream at the front. Here every feed remains its own stream with its own handshake through DEDUP_INGRESS, and they converge only at MARKET_LINE_ARBITER. This is what allows DEDUP_INGRESS to pass readiness straight through per feed with no skid buffer and no contention, so no feed can head-of-line block another. The cost is one output port and one set of comparators per feed.
 
 Scope
 
@@ -132,7 +132,7 @@ Handshake. Each connection uses a valid/ready pair. The sender raises valid when
 
 Beat format. A packet is carried as one or more beats. Each beat carries the payload and two boundary markers: start of packet and end of packet. A single beat packet has both markers set.
 
-Sequence number. The sequence number is not repeated on every beat. It arrives once, inside the payload of the first beat, at a byte offset and width fixed by the exchange protocol. DEDUP slices it out there, holds it for the remaining beats of that packet, and re-emits it on a separate signal alongside every beat it forwards. Stages after DEDUP therefore see the sequence number on every beat without parsing the header again. It identifies which packet a beat belongs to, and is what DEDUP and FIX_TRACKER use to match copies of the same packet across different feeds.
+Sequence number. The sequence number is not repeated on every beat. It arrives once, inside the payload of the first beat, at a byte offset and width fixed by the exchange protocol. DEDUP_INGRESS slices it out there, holds it for the remaining beats of that packet, and re-emits it on a separate signal alongside every beat it forwards. Stages after DEDUP_INGRESS therefore see the sequence number on every beat without parsing the header again. It identifies which packet a beat belongs to, and is what DEDUP_INGRESS and FIX_TRACKER use to match copies of the same packet across different feeds.
 
 Per feed signalling. Stages that handle several feeds at once carry the handshake per feed rather than for the group. A feed that is blocked does not stop the others, and readiness is reported back to each feed independently.
 

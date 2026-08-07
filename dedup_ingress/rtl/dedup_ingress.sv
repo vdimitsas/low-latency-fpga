@@ -1,11 +1,11 @@
 // -----------------------------------------------------------------------------
-// dedup
+// dedup_ingress
 //
 // Drops redundant copies of packets already confirmed complete by CHECKSUM.
 // Cut-through: no store-and-forward, no buffering, never stalls.
 // -----------------------------------------------------------------------------
 
-module dedup #(
+module dedup_ingress #(
     parameter int N_FEEDS    = 4,
     parameter int DATA_W     = 64,
     parameter int SEQ_W      = 32,
@@ -40,11 +40,11 @@ module dedup #(
     // -------------------------------------------------------------------------
     initial begin
         if (SEQ_OFFSET*8 + SEQ_W > DATA_W)
-            $error("dedup: seq field does not fit in the first beat");
+            $error("dedup_ingress: seq field does not fit in the first beat");
         if (CPT_DEPTH < 1)
-            $error("dedup: CPT_DEPTH must be at least 1");
+            $error("dedup_ingress: CPT_DEPTH must be at least 1");
         if (N_FEEDS < 1)
-            $error("dedup: N_FEEDS must be at least 1");
+            $error("dedup_ingress: N_FEEDS must be at least 1");
     end
 
     localparam int CPT_PTR_W = (CPT_DEPTH == 1) ? 1 : $clog2(CPT_DEPTH);
@@ -171,7 +171,7 @@ module dedup #(
     // output
     //
     // Cut-through. Data, boundary markers and the extracted seq pass straight
-    // through combinationally. The only thing DEDUP does to the stream is
+    // through combinationally. The only thing DEDUP_INGRESS does to the stream is
     // withhold valid on a feed whose seq matches a completed packet.
     //
     // A drop can land mid packet: a copy already partly forwarded is killed

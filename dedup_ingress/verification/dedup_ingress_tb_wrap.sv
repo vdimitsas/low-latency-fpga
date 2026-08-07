@@ -1,16 +1,16 @@
 // -----------------------------------------------------------------------------
-// dedup_tb_wrap
+// dedup_ingress_tb_wrap
 //
 // Verification wrapper. NOT design RTL.
 //
-// dedup uses packed two dimensional ports of the form [N_FEEDS-1:0][W-1:0].
+// dedup_ingress uses packed two dimensional ports of the form [N_FEEDS-1:0][W-1:0].
 // Those are awkward to reach from cocotb, so this wrapper presents each of
 // them as a single flat vector and does the slicing internally.
 //
 // Feed f occupies bits [f*W +: W] of the flat vector.
 // -----------------------------------------------------------------------------
 
-module dedup_tb_wrap #(
+module dedup_ingress_tb_wrap #(
     parameter int N_FEEDS    = 4,
     parameter int DATA_W     = 64,
     parameter int SEQ_W      = 32,
@@ -54,13 +54,13 @@ module dedup_tb_wrap #(
         end
     end
 
-    dedup #(
+    dedup_ingress #(
         .N_FEEDS    (N_FEEDS),
         .DATA_W     (DATA_W),
         .SEQ_W      (SEQ_W),
         .SEQ_OFFSET (SEQ_OFFSET),
         .CPT_DEPTH  (CPT_DEPTH)
-    ) u_dedup (
+    ) u_dedup_ingress (
         .clk        (clk),
         .rst_n      (rst_n),
 

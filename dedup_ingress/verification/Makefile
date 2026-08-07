@@ -1,5 +1,5 @@
 # =============================================================================
-# dedup verification
+# dedup_ingress verification
 #
 #   make                        run every test
 #   make MODULE=test_cpt        run one file
@@ -14,12 +14,12 @@ TOPLEVEL_LANG ?= verilog
 
 PWD := $(shell pwd)
 
-VERILOG_SOURCES += $(PWD)/../rtl/dedup.sv
-VERILOG_SOURCES += $(PWD)/dedup_tb_wrap.sv
+VERILOG_SOURCES += $(PWD)/../rtl/dedup_ingress.sv
+VERILOG_SOURCES += $(PWD)/dedup_ingress_tb_wrap.sv
 
-TOPLEVEL = dedup_tb_wrap
+TOPLEVEL = dedup_ingress_tb_wrap
 
-MODULE ?= test_passthrough,test_dedup_core,test_cpt,test_midpacket,test_backpressure,test_random
+MODULE ?= test_passthrough,test_dedup_ingress_core,test_cpt,test_midpacket,test_backpressure,test_random
 
 EXTRA_ARGS += -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND
 
