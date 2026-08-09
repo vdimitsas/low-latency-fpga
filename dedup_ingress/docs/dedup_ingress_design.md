@@ -1,4 +1,4 @@
-# dedup_ingress, Microarchitecture
+# dedup_ingress Microarchitecture Specification
 
 ## 1. Purpose and scope
 
@@ -381,6 +381,8 @@ ready path: `in_ready` must stay independent of the tree.
 ```
 cd verification && make
 ```
+
+The RTL was mutated to check the tests catch what they claim to.
 
 ### Golden model
 

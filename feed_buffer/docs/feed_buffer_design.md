@@ -1,4 +1,4 @@
-# feed_buffer, design document
+# feed_buffer Microarchitecture Specification
 
 ## 1. Purpose and scope
 
@@ -369,6 +369,8 @@ cd verification && make                  # feed_buffer
 cd verification && make -f Makefile.fifo # sync_fifo
 ```
 
+The RTL was mutated to check the tests catch what they claim to.
+
 ### The golden model
 
 `feed_buffer_common.py` holds a cycle accurate model of one slice: a FIFO, an
@@ -426,29 +428,3 @@ carries almost everything, heavy backpressure where the FIFOs fill and
 `in_ready` starts falling, invalidate firing often against a background of
 stalls, and single beat packets only, which is where a FIFO holds the most
 distinct packets at once.
-
-### Mutation testing
-
-The suite is mutation checked: the RTL is broken deliberately, one change at a
-time, to confirm the tests fail. A test that passes against a broken design is
-not testing anything.
-
-Against 29 `feed_buffer` tests and 8 `sync_fifo` tests:
-
-| Mutation | `feed_buffer` failed | `sync_fifo` failed |
-|---|---|---|
-| `out_reg_free` is just `out_ready` | 14 | 0 |
-| Bypass ignores `fifo_empty` | 13 | 0 |
-| FIFO read ignores `out_reg_free` | 12 | 0 |
-| `in_ready` loses the `out_reg_free` term | 7 | 0 |
-| Drop ignores the sticky bit | 5 | 0 |
-| `sync_fifo` refuses a write when full | 5 | 2 |
-| Drop ignores `in_sop`, so a `sop` is not accepted | 4 | 0 |
-| Drop has no same cycle path | 3 | 0 |
-| Sticky clears only on `eop`, so a `sop` never clears it | 2 | 0 |
-| Sticky clears only on `sop`, so an `eop` never clears it | 0 | 0 |
-
-The last one is not a coverage gap. Removing the `eop` condition changes nothing
-observable, because the beat after a dropped `eop` is always a `sop`, which
-clears the bit at the same moment. Section 5 explains why the condition is kept
-anyway.

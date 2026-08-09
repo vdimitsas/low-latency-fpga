@@ -1,4 +1,4 @@
-# market_line_arbiter, Microarchitecture
+# market_line_arbiter Microarchitecture Specification
 
 ## 1. Purpose and scope
 
@@ -9,6 +9,16 @@ The system-level design document covers what this component does within the pars
 Timing-sensitive behaviour is described cycle accurately. Where a sequence of events matters, such as arming, confirming, and releasing during starvation, each step is given its exact cycle number rather than a general description, so the mechanism can be checked directly against the RTL or a waveform.
 
 It is written for engineers reviewing or modifying this component directly: readers who need to understand not just its behaviour at the interface, but why the RTL is built the way it is.
+
+### Known limits
+
+**Only verified at four feeds.** `NUM_FEEDS` is a parameter, but the entire test suite runs at 4. The RTL is written generically and nothing in it assumes a specific feed count, but that is untested. Higher feed counts would also deepen the selection logic, so the timing result in section 6 should not be assumed to hold as the count grows.
+
+**No mid-stream reset test.** All tests reset once at the start and run to completion. Asserting `rst_n` in the middle of a packet, with skid buffers holding data and a giveup in progress, is not covered.
+
+**`HICCUP_CYCLES` cannot go below 3.** This is structural, explained in section 5, and enforced at compile time. It means the arbiter cannot be configured to give up faster than three silent cycles.
+
+**Timing is post-synthesis only.** Section 6's numbers come from synthesis, not place and route. Routing this component in isolation, with all its ports forced to chip pins, would not produce a number that means anything about the final design, so it is deferred until the surrounding parser stages exist. The IOB overflow noted in section 6 is the same fact seen from another angle.
 
 ## 2. Interface
 
@@ -89,17 +99,7 @@ Everything decided in Stage 1, which feed was picked, its data and boundary mark
 
 Stage 2 holds the registered output (`out_valid`, `out_data`, `out_seq`, `out_sop`, `out_eop`, `out_feed`), and separately tracks how long the currently selected feed has gone silent. That tracking is what drives the starvation and recovery mechanism, covered cycle by cycle in the next section.
 
-### Why invalidation lives in FEED_BUFFER, not here
-
-An earlier version of the arbiter tried to handle a stalled feed entirely by itself, with its own state machine tracking whether that feed was mid-packet. That ran into a real problem: whether the arbiter should stay locked onto the feed, and whether it should recognise the feed as dead, ended up depending on each other. Neither could be decided cleanly without the other one already being known.
-
-The fix was to stop trying to solve this inside the arbiter. Now the arbiter only decides one thing: when to give up on a feed. It signals that decision once, with the `invalidate_feed` pulse, and lets FEED_BUFFER deal with the actual leftover data. That removed the circular dependency entirely, because the arbiter no longer needs to track packet state to make its decision.
-
-### Why `serve_feed_q` resets to all zero, not to feed 0
-
-Resetting to a specific one-hot value (say, feed 0 selected) would make the very first cycle after reset behave as if feed 0 were already sticky, before it has ever actually served anything. Resetting to all-zero means sticky is false on the first cycle regardless of feed count, and the real priority order runs from the first live cycle onward.
-
-## 4. Starvation handling
+## 4. Behaviour
 
 ### The counter
 
@@ -118,18 +118,6 @@ One cycle after that, `invalidate_feed_q` holds the record of the pulse. `sticky
 Three cycles, therefore: one to detect, one for `invalidate_q` to become visible and fire the pulse, one for `invalidate_feed_q` to release sticky. `ARM_CNT = HICCUP_CYCLES - 3` places the arm point exactly far enough back that the pulse lands at `hiccup_cnt == HICCUP_CYCLES - 1`.
 
 The one-cycle gap between arming and firing is also what lets a late beat cancel the giveup. If the feed delivers on the firing cycle, `serve_valid_c` is high, `invalidate_feed` never fires, and the feed carries on. The further one-cycle delay before release is what allows beats already in flight to reach the output before the feed is dropped.
-
-### Why `HICCUP_CYCLES` cannot be below 3
-
-With `HICCUP_CYCLES = 1`, `ARM_CNT` evaluates to `-2`, which is not a value the counter can ever hold. The arm condition would never be true. Structurally the same thing is being said: a threshold of one leaves no cycles for the decision to pass through `invalidate_q` and `invalidate_feed_q`, so the pulse cannot possibly be produced within the threshold it is supposed to respect. `HICCUP_CYCLES = 2` fails for the same reason with one cycle of shortfall instead of two.
-
-Both values are rejected at compile time rather than allowed to behave incorrectly.
-
-Intuitively they would be poor choices anyway. Declaring a feed dead after a single quiet cycle defeats the purpose of tolerating short gaps, which is the reason the mechanism exists. Three is the structural minimum, and arguably still aggressive in practice, but it is the point below which the design cannot function at all.
-
-### The boundary at 3
-
-At `HICCUP_CYCLES = 3`, `ARM_CNT` is 0, which is also the counter's reset value. The arm comparison is therefore true whenever the counter sits at zero, including immediately after a successful transfer clears it. This is why the arm condition carries `&& !serve_valid_q`: without it, the arbiter armed during the first valid beat of a packet and produced two invalidate pulses instead of one. The gate restricts arming to genuine silence.
 
 ### Walkthrough
 
@@ -153,7 +141,31 @@ The waveform shows the full sequence at `HICCUP_CYCLES = 4`. The mechanism is id
 
 The important detail is the gap between the pulse and the release. `invalidate_feed` fires one cycle before `sticky` drops, because `sticky` reads `invalidate_feed_q` rather than the live signal. That extra cycle is what lets the last in-flight beats reach the output before the feed is dropped.
 
-## 5. Timing closure
+## 5. Design decisions
+
+### Why invalidation lives in FEED_BUFFER, not here
+
+An earlier version of the arbiter tried to handle a stalled feed entirely by itself, with its own state machine tracking whether that feed was mid-packet. That ran into a real problem: whether the arbiter should stay locked onto the feed, and whether it should recognise the feed as dead, ended up depending on each other. Neither could be decided cleanly without the other one already being known.
+
+The fix was to stop trying to solve this inside the arbiter. Now the arbiter only decides one thing: when to give up on a feed. It signals that decision once, with the `invalidate_feed` pulse, and lets FEED_BUFFER deal with the actual leftover data. That removed the circular dependency entirely, because the arbiter no longer needs to track packet state to make its decision.
+
+### Why `serve_feed_q` resets to all zero, not to feed 0
+
+Resetting to a specific one-hot value (say, feed 0 selected) would make the very first cycle after reset behave as if feed 0 were already sticky, before it has ever actually served anything. Resetting to all-zero means sticky is false on the first cycle regardless of feed count, and the real priority order runs from the first live cycle onward.
+
+### Why `HICCUP_CYCLES` cannot be below 3
+
+With `HICCUP_CYCLES = 1`, `ARM_CNT` evaluates to `-2`, which is not a value the counter can ever hold. The arm condition would never be true. Structurally the same thing is being said: a threshold of one leaves no cycles for the decision to pass through `invalidate_q` and `invalidate_feed_q`, so the pulse cannot possibly be produced within the threshold it is supposed to respect. `HICCUP_CYCLES = 2` fails for the same reason with one cycle of shortfall instead of two.
+
+Both values are rejected at compile time rather than allowed to behave incorrectly.
+
+Intuitively they would be poor choices anyway. Declaring a feed dead after a single quiet cycle defeats the purpose of tolerating short gaps, which is the reason the mechanism exists. Three is the structural minimum, and arguably still aggressive in practice, but it is the point below which the design cannot function at all.
+
+### The boundary at 3
+
+At `HICCUP_CYCLES = 3`, `ARM_CNT` is 0, which is also the counter's reset value. The arm comparison is therefore true whenever the counter sits at zero, including immediately after a successful transfer clears it. This is why the arm condition carries `&& !serve_valid_q`: without it, the arbiter armed during the first valid beat of a packet and produced two invalidate pulses instead of one. The gate restricts arming to genuine silence.
+
+## 6. Timing
 
 ### Setup
 
@@ -190,13 +202,13 @@ Bonded IOB usage is reported at 515 against 400 available on this package, 128.7
 
 These are post-synthesis numbers, not post-route. Placement and routing will move them, so this result is a check on the RTL's structure rather than a final figure.
 
-## 6. Verification
+## 7. Verification
 
 ### Approach
 
 The component is verified in simulation with cocotb driving Verilator. Tests are Python, the DUT is wrapped in a thin SystemVerilog wrapper (`market_line_arbiter_tb_wrap.sv`) that flattens the packed array ports so cocotb can drive them per feed.
 
-Two layers: directed tests that target specific mechanisms, and a random test checked against a golden model. The full suite is 32 tests, all passing.
+Two layers: directed tests that target specific mechanisms, and a random test checked against a golden model. The full suite is 32 tests, all passing. The RTL was mutated to check the tests catch what they claim to.
 
 ### Directed tests
 
@@ -227,28 +239,12 @@ The golden model is not a rewrite of the RTL in Python. It was built from the be
 make HICCUP_CYCLES=N
 ```
 
-The full suite passes at 3, 4, 8, 13, and 16. Three is the structural minimum, enforced by a compile-time `$error` guard as described in section 4. Sixteen is an arbitrary upper point, chosen to exercise a long counter without the sweep taking excessive time.
+The full suite passes at 3, 4, 8, 13, and 16. Three is the structural minimum, enforced by a compile-time `$error` guard as described in section 5. Sixteen is an arbitrary upper point, chosen to exercise a long counter without the sweep taking excessive time.
 
-The value 3 is the important one, since it is the boundary where `ARM_CNT` collides with the counter's reset value. That case found a real bug, the double-arm described in section 4, which the sweep caught and which values above 3 do not expose.
+The value 3 is the important one, since it is the boundary where `ARM_CNT` collides with the counter's reset value. That case found a real bug, the double-arm described in section 5, which the sweep caught and which values above 3 do not expose.
 
 ### What the tests establish
 
 Packets are never interleaved between feeds. No beat is lost or duplicated under backpressure. The giveup sequence produces exactly one `invalidate_feed` pulse per abandoned packet, at the correct cycle. A late beat arriving on the firing cycle cancels the giveup. The behaviour holds across the swept `HICCUP_CYCLES` values.
 
-## 7. Known limitations and future work
-
-### Limitations
-
-**Only verified at four feeds.** `NUM_FEEDS` is a parameter, but the entire test suite runs at 4. The RTL is written generically and nothing in it assumes a specific feed count, but that is untested. Higher feed counts would also deepen the selection logic, so the timing result in section 5 should not be assumed to hold as the count grows.
-
-**No mid-stream reset test.** All tests reset once at the start and run to completion. Asserting `rst_n` in the middle of a packet, with skid buffers holding data and a giveup in progress, is not covered.
-
-**`HICCUP_CYCLES` cannot go below 3.** This is structural, explained in section 4, and enforced at compile time. It means the arbiter cannot be configured to give up faster than three silent cycles.
-
-**Timing is post-synthesis only.** Section 5's numbers come from synthesis, not place and route. Routing this component in isolation, with all its ports forced to chip pins, would not produce a number that means anything about the final design, so it is deferred until the surrounding parser stages exist. The IOB overflow noted in section 5 is the same fact seen from another angle.
-
-### Future work
-
-Feed count and mid-stream reset are the two verification gaps worth closing next, since both are testable against the RTL as it stands.
-
-Throughput and format-handling goals are set at the parser level rather than here, and are covered in the top-level design document.
+Feed count and mid-stream reset are the two gaps worth closing next, since both are testable against the RTL as it stands. Throughput and format-handling goals are set at the parser level rather than here, and are covered in the top-level design document.
