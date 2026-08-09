@@ -86,8 +86,11 @@ class GoldenFeed:
         self.invalidated = 0
 
     # -- combinational view of this cycle ---------------------------------
-    def in_ready(self):
-        return 0 if len(self.fifo) >= self.depth else 1
+    def in_ready(self, out_ready=None):
+        if len(self.fifo) < self.depth:
+            return 1
+        # Full. A beat is still accepted if one is leaving on the same edge.
+        return self._out_reg_free(out_ready if out_ready is not None else 0)
 
     def out_valid(self):
         return self.out_reg_valid
@@ -104,7 +107,7 @@ class GoldenFeed:
     def _bypass(self, in_valid, in_sop, out_ready, invalidate_feed):
         return 1 if (
             in_valid
-            and self.in_ready()
+            and self.in_ready(out_ready)
             and not self._drop(invalidate_feed, in_sop)
             and len(self.fifo) == 0
             and self._out_reg_free(out_ready)
@@ -116,7 +119,7 @@ class GoldenFeed:
         in_eop = beat.eop if beat is not None else 0
 
         drop = self._drop(invalidate_feed, in_sop)
-        accepted = in_valid and self.in_ready()
+        accepted = in_valid and self.in_ready(out_ready)
         bypass = self._bypass(in_valid, in_sop, out_ready, invalidate_feed)
         out_reg_free = self._out_reg_free(out_ready)
         fifo_was_empty = len(self.fifo) == 0
@@ -136,7 +139,8 @@ class GoldenFeed:
         if not fifo_was_empty and out_reg_free:
             self.fifo.popleft()
 
-        # fifo write
+        # fifo write. On a full FIFO this is only reachable when a read
+        # happened above, so the append lands in the slot that just freed.
         if accepted and not drop and not bypass:
             self.fifo.append(beat)
 
@@ -157,8 +161,8 @@ class GoldenFeedBuffer:
         for f in self.feeds:
             f.reset()
 
-    def in_ready(self):
-        return [f.in_ready() for f in self.feeds]
+    def in_ready(self, out_ready):
+        return [f.in_ready(out_ready[i]) for i, f in enumerate(self.feeds)]
 
     def out_valid(self):
         return [f.out_valid() for f in self.feeds]
@@ -273,7 +277,7 @@ class FeedBufferTB:
             invalidate_feed=list(self.invalidate_feed),
         )
 
-        exp_in_ready = self.golden.in_ready()
+        exp_in_ready = self.golden.in_ready(self.out_ready)
         exp_out_valid = self.golden.out_valid()
         exp_out_beats = [f.out_beat() for f in self.golden.feeds]
 

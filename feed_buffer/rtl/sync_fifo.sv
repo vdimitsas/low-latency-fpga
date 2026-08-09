@@ -10,6 +10,13 @@
 // Full and empty come from an extra pointer bit rather than a counter. Both
 // pointers are WIDTH_PTR+1 bits wide: equal pointers means empty, equal
 // pointers with different top bits means full.
+//
+// A write is not qualified with full inside this module. Asserting wr_en on a
+// full FIFO with no read in the same cycle overwrites the head. The caller has
+// to prevent that. What it buys is the opposite case: a write and a read
+// together on a full FIFO are both accepted, one in and one out, so a full
+// FIFO does not have to refuse a beat for a cycle while full catches up with
+// the pop.
 // -----------------------------------------------------------------------------
 
 module sync_fifo #(
@@ -79,11 +86,12 @@ module sync_fifo #(
     // -------------------------------------------------------------------------
     // write
     //
-    // wr_en is qualified with full here as well as by the caller, so a write
-    // into a full FIFO cannot corrupt the head.
+    // Not qualified with full. See the note in the header: the caller decides
+    // whether a write is allowed, which is what lets a write and a read land
+    // together on a full FIFO.
     // -------------------------------------------------------------------------
     always_ff @(posedge clk) begin
-        if (wr_en && !full) begin
+        if (wr_en) begin
             mem[wr_addr] <= wr_data;
         end
     end
@@ -91,7 +99,7 @@ module sync_fifo #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             wr_ptr <= '0;
-        end else if (wr_en && !full) begin
+        end else if (wr_en) begin
             wr_ptr <= wr_ptr + 1'b1;
         end
     end

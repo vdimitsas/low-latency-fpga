@@ -3,10 +3,16 @@
 The FIFO is generic and knows nothing about beats or feeds, so it is verified
 on its own before feed_buffer is built on top of it.
 
-The one property worth stating up front: rd_data is combinational. When empty
-is low, rd_data already shows the head in that same cycle. That is what makes
-the read path one cycle rather than two, and test_head_is_visible_immediately
-is the assertion that holds it in place.
+Two properties worth stating up front.
+
+rd_data is combinational. When empty is low, rd_data already shows the head in
+that same cycle. That is what makes the read path one cycle rather than two,
+and test_head_is_visible_immediately is the assertion that holds it in place.
+
+The write is not qualified with full inside the module. A write and a read
+together on a full FIFO are both accepted, one in and one out. A write on a
+full FIFO with no read overwrites the head, and the caller is required to
+prevent that, so no test here does it.
 """
 
 import os
@@ -79,13 +85,15 @@ class FifoTB:
 
         await RisingEdge(self.dut.clk)
 
-        # advance the model exactly as the RTL does. Both flags are evaluated
-        # against the occupancy before the edge, so a read and a write in the
-        # same cycle on a full FIFO does not make room for the write.
-        if wr_en and not exp_full:
-            self.model.append(wr_data & MASK)
+        # Advance the model exactly as the RTL does. The write is no longer
+        # qualified with full inside the FIFO, so a write and a read together
+        # on a full FIFO are both accepted: one in, one out, occupancy
+        # unchanged. A write on a full FIFO with no read overwrites the head,
+        # which the caller is required to prevent and which no test does.
         if rd_en and not exp_empty:
             self.model.popleft()
+        if wr_en and (not exp_full or (rd_en and not exp_empty)):
+            self.model.append(wr_data & MASK)
 
         self.dut.wr_en.value = 0
         self.dut.rd_en.value = 0
@@ -142,25 +150,40 @@ async def test_fill_to_full(dut):
 
 
 @cocotb.test()
-async def test_write_while_full_is_ignored(dut):
-    """A write into a full FIFO must not corrupt the head or the pointers."""
+async def test_write_and_read_together_while_full(dut):
+    """A write and a read on the same cycle are both accepted when full.
+
+    This is what stops a full FIFO refusing a beat for one cycle while full
+    catches up with the pop. Occupancy has to stay at DEPTH, the beat leaving
+    has to be the old head, and order has to hold across the drain after.
+    """
     tb = FifoTB(dut)
     await tb.start()
 
     for i in range(DEPTH):
         await tb.step(wr_en=1, wr_data=0x200 + i)
 
-    # Several writes that must all be refused.
-    for _ in range(3):
-        got = await tb.step(wr_en=1, wr_data=0xBAD)
-        assert got["full"] == 1, "full dropped on a refused write"
-        assert got["rd_data"] == 0x200, "the head moved on a refused write"
+    got = await tb.step()
+    assert got["full"] == 1, "expected the FIFO to be full"
 
-    # Drain and check every original entry, in order.
-    for i in range(DEPTH):
+    # Four cycles of one in, one out, while full throughout.
+    for j in range(4):
+        got = await tb.step(wr_en=1, wr_data=0x900 + j, rd_en=1)
+        assert got["full"] == 1, (
+            f"cycle {j}: full dropped, so occupancy changed during an overwrite"
+        )
+        assert got["rd_data"] == 0x200 + j, (
+            f"cycle {j}: the head was corrupted by the beat arriving, "
+            f"got {got['rd_data']:#x}"
+        )
+
+    # Drain. What comes out is the untouched remainder, then the four new ones.
+    expected = [0x200 + i for i in range(4, DEPTH)] + [0x900 + j for j in range(4)]
+    for i, want in enumerate(expected):
         got = await tb.step(rd_en=1)
-        assert got["rd_data"] == 0x200 + i, (
-            f"entry {i} corrupted: got {got['rd_data']:#x}"
+        assert got["rd_data"] == want, (
+            f"entry {i} wrong after the overwrites: "
+            f"got {got['rd_data']:#x} expected {want:#x}"
         )
 
     got = await tb.step()
@@ -262,6 +285,11 @@ async def test_random(dut):
         for _ in range(cycles):
             wr = 1 if rnd.random() < wr_p else 0
             rd = 1 if rnd.random() < rd_p else 0
+            # The caller must not write into a full FIFO unless it is also
+            # reading, which is the contract feed_buffer satisfies. Holding to
+            # it here keeps the overwrite case in its own directed test.
+            if wr and len(tb.model) >= DEPTH and not rd:
+                wr = 0
             counter = (counter + 1) & MASK
             await tb.step(wr_en=wr, wr_data=counter, rd_en=rd)
 

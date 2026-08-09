@@ -124,17 +124,26 @@ module feed_buffer #(
                 .empty   (fifo_empty)
             );
 
+            logic out_reg_free;
+            assign out_reg_free = !out_reg_valid[f] || out_ready[f];
+
             // -----------------------------------------------------------------
             // flow control
             //
-            // in_ready is FIFO occupancy alone. Letting the arbiter's out_ready
-            // into it would run a combinational path from the arbiter back
-            // through this block into DEDUP_INGRESS, which has no margin.
+            // Occupancy alone is not enough. With the FIFO full and the output
+            // register occupied, the cycle the arbiter takes a beat the FIFO
+            // pops, but full is computed from the pointers as they stood and
+            // does not clear until the next cycle. A beat arriving in between
+            // would be refused for no reason.
+            //
+            // out_reg_free removes that. When it is high the whole feed shifts
+            // along by one, so a beat can come in on the same edge that one
+            // leaves. sync_fifo does not qualify its write with full, which is
+            // what makes this legal: when full is high, in_ready and fifo_rd_en
+            // both reduce to out_reg_free, so a write only ever lands on a full
+            // FIFO in the same cycle as a read.
             // -----------------------------------------------------------------
-            assign in_ready[f] = !fifo_full;
-
-            logic out_reg_free;
-            assign out_reg_free = !out_reg_valid[f] || out_ready[f];
+            assign in_ready[f] = !fifo_full || out_reg_free;
 
             // -----------------------------------------------------------------
             // bypass

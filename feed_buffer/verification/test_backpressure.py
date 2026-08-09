@@ -3,9 +3,10 @@
 Downstream: the arbiter lowers out_ready and the output register holds its
 contents, unchanged, until it is taken.
 
-Upstream: in_ready comes from FIFO occupancy alone, so it only falls when that
-feed's FIFO is genuinely full. The arbiter's readiness never reaches it, which
-is what keeps feeds independent of one another.
+Upstream: in_ready is !fifo_full || out_reg_free. It falls when that feed's
+FIFO is full and nothing is leaving. It does not fall when the FIFO is full but
+the arbiter is taking a beat that cycle, because the whole feed shifts along by
+one and a slot opens on the same edge.
 """
 
 import cocotb
@@ -177,4 +178,88 @@ async def test_beat_offered_while_full_is_not_accepted(dut):
     )
     assert all(b.data != 0xDEAD for b in out), (
         "the beat offered while full came out"
+    )
+
+
+@cocotb.test()
+async def test_full_fifo_accepts_a_beat_while_draining(dut):
+    """A full feed still accepts a beat on the cycle the arbiter takes one.
+
+    Without the out_reg_free term in in_ready this is where a bubble appears.
+    The FIFO pops when the arbiter takes the output register, but full is
+    computed from the pointers as they stood and does not clear until the next
+    cycle, so a beat arriving in between would be refused for nothing.
+    """
+    tb = FeedBufferTB(dut)
+    await tb.start()
+
+    capacity = FIFO_DEPTH + 1
+    sent = []
+
+    # Fill to full with the arbiter stalled.
+    for i in range(capacity):
+        tb.out_ready = [0] * N_FEEDS
+        tb.present(0, data=0x8000 + i, seq=0x8888, sop=1 if i == 0 else 0)
+        await tb.step()
+        sent.append(0x8000 + i)
+
+    tb.out_ready = [0] * N_FEEDS
+    got = await tb.step()
+    assert got["in_ready"][0] == 0, "expected the feed to be blocked while stalled"
+
+    # Arbiter takes a beat and a new one arrives in the same cycle.
+    tb.out_ready = [1] * N_FEEDS
+    tb.present(0, data=0x8FFF, seq=0x8888)
+    got = await tb.step()
+    assert got["in_ready"][0] == 1, (
+        "the feed refused a beat on the cycle one was leaving, so the bubble "
+        "is still there"
+    )
+    sent.append(0x8FFF)
+
+    tb.out_ready = [1] * N_FEEDS
+    await drain(tb, capacity + 12)
+
+    out = beats_taken(tb, 0)
+    assert [b.data for b in out] == sent, (
+        f"the accepted beat was lost or reordered: got {len(out)} beats, "
+        f"sent {len(sent)}"
+    )
+
+
+@cocotb.test()
+async def test_sustained_full_throughput(dut):
+    """Full FIFO, arbiter ready every cycle, a beat in every cycle.
+
+    One in and one out on every edge, sustained. Occupancy never changes and
+    no beat is lost or reordered.
+    """
+    tb = FeedBufferTB(dut)
+    await tb.start()
+
+    capacity = FIFO_DEPTH + 1
+    sent = []
+
+    for i in range(capacity):
+        tb.out_ready = [0] * N_FEEDS
+        tb.present(0, data=0x9000 + i, seq=0x9999, sop=1 if i == 0 else 0)
+        await tb.step()
+        sent.append(0x9000 + i)
+
+    for i in range(16):
+        tb.out_ready = [1] * N_FEEDS
+        tb.present(0, data=0x9500 + i, seq=0x9999)
+        got = await tb.step()
+        assert got["in_ready"][0] == 1, (
+            f"cycle {i}: the feed stalled during sustained one in one out"
+        )
+        sent.append(0x9500 + i)
+
+    tb.out_ready = [1] * N_FEEDS
+    await drain(tb, capacity + 24)
+
+    out = beats_taken(tb, 0)
+    assert [b.data for b in out] == sent, (
+        f"beats lost or reordered under sustained full throughput: "
+        f"got {len(out)}, sent {len(sent)}"
     )
