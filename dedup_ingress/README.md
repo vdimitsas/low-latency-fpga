@@ -57,12 +57,18 @@ through. That is a known limit of the window size.
 - Worst path runs from the input data through the comparator tree to
   `out_valid`, 7 logic levels.
 
-Because the datapath is cut-through, a standalone synthesis of `dedup_ingress` contains
-no register to register path through the comparator tree and STA has nothing to
-time. The number above is measured through `sta/dedup_ingress_sta_harness.sv`, which
-flops every port of the block so that the combinational datapath becomes a real
-timed path. Those flops exist only for the measurement and are not part of the
-design.
+Because the datapath is cut-through, a standalone synthesis of `dedup_ingress`
+contains no register to register path through the comparator tree and STA has
+nothing to time. The number above is measured through
+`sta/dedup_ingress_sta_harness.sv`, which flops every port of the block so that
+the combinational datapath becomes a real timed path. Those flops exist only for
+the measurement and are not part of the design.
+
+Reproduce with:
+
+```bash
+cd sta && vivado -mode batch -source run.tcl
+```
 
 ## Verification
 
@@ -119,8 +125,10 @@ dedup_ingress/
 ├── rtl/
 │   └── dedup_ingress.sv                     # the dedup_ingress RTL
 ├── sta/
-│   └── dedup_ingress_sta_harness.sv         # synthesis harness, not design RTL
+│   ├── dedup_ingress_sta_harness.sv         # synthesis harness, not design RTL
+│   └── run.tcl                              # synthesis and timing script
 ├── docs/
+│   ├── dedup_ingress_design.md              # detailed design notes
 │   └── dedup_ingress.svg                    # block diagram
 └── verification/
     ├── Makefile
