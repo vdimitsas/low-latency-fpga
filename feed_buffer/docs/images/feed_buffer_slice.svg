@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620">
+  <rect width="1120" height="620" fill="#ffffff"/>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#111111"/>
+    </marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#777777"/>
+    </marker>
+  </defs>
+
+  <style>
+    .blk   { fill:none; stroke:#111111; stroke-width:1.6; }
+    .gate  { fill:none; stroke:#111111; stroke-width:1.6; }
+    .name  { font-family:"DejaVu Sans Mono",monospace; font-size:15px; fill:#111111; }
+    .nm    { font-family:"DejaVu Sans Mono",monospace; font-size:13px; fill:#111111; }
+    .eq    { font-family:"DejaVu Sans Mono",monospace; font-size:12.5px; fill:#333333; }
+    .sub   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:12px; fill:#444444; }
+    .lbl   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:13px; fill:#111111; }
+    .lblg  { font-family:"DejaVu Sans",Arial,sans-serif; font-size:12px; fill:#777777; }
+    .data  { fill:none; stroke:#111111; stroke-width:1.6; marker-end:url(#ar); }
+    .wire  { fill:none; stroke:#111111; stroke-width:1.6; }
+    .ctrl  { fill:none; stroke:#777777; stroke-width:1.4; marker-end:url(#arg); }
+    .cwire { fill:none; stroke:#777777; stroke-width:1.4; }
+    .legend{ fill:none; stroke:#cccccc; stroke-width:1.2; }
+    .title { font-family:"DejaVu Sans Mono",monospace; font-size:20px; fill:#111111; }
+  </style>
+
+  <text class="title" x="40" y="42">FEED_BUFFER, one slice</text>
+  <text class="sub"   x="40" y="64">Repeated N_FEEDS times. Every signal here is per feed.</text>
+
+  <!-- ===================== input and in_beat ===================== -->
+  <text class="lbl"  x="40" y="196">in_valid</text>
+  <text class="lblg" x="40" y="212">in_data, in_seq</text>
+  <text class="lblg" x="40" y="227">in_sop, in_eop</text>
+  <path class="data" d="M148,190 L214,190"/>
+
+  <rect class="blk" x="216" y="167" width="96" height="46"/>
+  <text class="nm"  x="264" y="187" text-anchor="middle">in_beat</text>
+  <text class="sub" x="264" y="203" text-anchor="middle">beat_t</text>
+
+  <path class="wire" d="M312,190 L392,190"/>
+  <circle cx="392" cy="190" r="3.5" fill="#111111"/>
+
+  <!-- ===================== AND on the bypass leg ===================== -->
+  <path class="wire" d="M392,190 L392,130 L436,130"/>
+  <path class="gate" d="M438,114 L456,114 A16,16 0 0 1 456,146 L438,146 z"/>
+  <path class="data" d="M472,130 L620,130 L620,182 L688,182"/>
+  <text class="lblg" x="500" y="124">bypass path</text>
+
+  <!-- ===================== AND on the fifo leg ===================== -->
+  <path class="wire" d="M392,190 L392,290 L436,290"/>
+  <path class="gate" d="M438,274 L456,274 A16,16 0 0 1 456,306 L438,306 z"/>
+  <path class="data" d="M472,290 L488,290"/>
+
+  <rect class="blk" x="490" y="262" width="152" height="56"/>
+  <text class="name" x="566" y="286" text-anchor="middle">sync_fifo</text>
+  <text class="sub"  x="566" y="303" text-anchor="middle">FIFO_DEPTH deep</text>
+
+  <text class="lblg" x="492" y="256">wr_en</text>
+  <text class="lblg" x="586" y="256">rd_data</text>
+
+  <path class="wire" d="M642,290 L666,290 L666,242"/>
+  <path class="data" d="M666,242 L688,242"/>
+
+  <!-- ===================== mux ===================== -->
+  <path class="gate" d="M690,152 L690,268 L742,242 L742,178 z"/>
+  <text class="sub"  x="716" y="214" text-anchor="middle">mux</text>
+
+  
+  
+  
+
+  <path class="ctrl" d="M716,104 L716,150"/>
+  <text class="lblg" x="726" y="102">bypass</text>
+
+  <!-- ===================== output register ===================== -->
+  <path class="data" d="M742,210 L800,210"/>
+
+  <rect class="blk" x="802" y="182" width="164" height="56"/>
+  <text class="name" x="884" y="204" text-anchor="middle">out_reg</text>
+  <text class="sub"  x="884" y="222" text-anchor="middle">+ out_reg_valid</text>
+
+  <path class="data" d="M966,210 L1050,210"/>
+  <text class="lbl"  x="1008" y="198" text-anchor="middle">out_*</text>
+
+  <text class="lblg" x="1058" y="262">out_ready</text>
+  <path class="ctrl" d="M1050,258 L1010,258 L1010,352 L600,352 L600,322"/>
+  <path class="cwire" d="M960,352 L960,404"/>
+  <circle cx="960" cy="352" r="3" fill="#777777"/>
+  <text class="lblg" x="900" y="346" text-anchor="end">out_reg_free</text>
+
+  <!-- ===================== sticky invalidate and drop ===================== -->
+  <rect class="blk" x="216" y="420" width="200" height="70"/>
+  <text class="nm"  x="316" y="446" text-anchor="middle">invalidated</text>
+  <text class="sub" x="316" y="463" text-anchor="middle">sticky, one bit</text>
+  <text class="sub" x="316" y="479" text-anchor="middle">clears on sop or eop</text>
+
+  <text class="lblg" x="40" y="446">invalidate_feed</text>
+  <path class="ctrl" d="M148,441 L214,441"/>
+
+  <text class="lblg" x="40" y="478">in_sop, in_eop</text>
+  <path class="ctrl" d="M148,473 L214,473"/>
+
+  <!-- drop riser: up the far left, over the top, down into both AND gates -->
+  <path class="cwire" d="M216,455 L180,455 L180,88 L418,88"/>
+  <path class="cwire" d="M418,88 L418,298"/>
+  <path class="ctrl"  d="M418,138 L436,138"/>
+  <circle cx="418" cy="88" r="3" fill="#777777"/>
+  <circle cx="418" cy="138" r="3" fill="#777777"/>
+  <path class="ctrl"  d="M418,298 L436,298"/>
+  <text class="nm"   x="196" y="82">!drop</text>
+
+  <!-- ===================== in_ready ===================== -->
+  <path class="cwire" d="M520,320 L520,384"/>
+  <text class="lblg" x="526" y="340">!full</text>
+  <path class="cwire" d="M520,384 L352,384"/>
+  <path class="cwire" d="M960,404 L352,404"/>
+  <path class="gate" d="M356,376 A40,40 0 0 0 356,412 A56,56 0 0 1 304,394 A56,56 0 0 1 356,376 z"/>
+  <path class="ctrl" d="M304,394 L148,394"/>
+  <text class="lblg" x="40" y="398">in_ready</text>
+
+  <!-- ===================== legend ===================== -->
+  <rect class="legend" x="40" y="516" width="1040" height="80"/>
+  <text class="eq" x="60" y="540">in_ready     = !full || out_reg_free</text>
+  <text class="eq" x="60" y="560">out_reg_free = !out_reg_valid || out_ready</text>
+  <text class="eq" x="60" y="580">drop         = (invalidate_feed || invalidated) &amp;&amp; !in_sop</text>
+  <text class="eq" x="540" y="540">bypass = in_valid &amp;&amp; in_ready &amp;&amp; !drop &amp;&amp; empty &amp;&amp; out_reg_free</text>
+  <text class="eq" x="540" y="560">wr_en  = in_valid &amp;&amp; in_ready &amp;&amp; !drop &amp;&amp; !bypass</text>
+  <text class="eq" x="540" y="580">rd_en  = !empty &amp;&amp; out_reg_free</text>
+</svg>

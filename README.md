@@ -13,7 +13,7 @@ is wired together.
 | Component | Status | WNS at 325 MHz |
 |---|---|---|
 | `dedup_ingress` | Implemented, verified, timing closed | +0.179 ns |
-| `feed_buffer` | Implemented, verified, timing closed | +0.697 ns |
+| `feed_buffer` | Implemented, verified, timing closed | +0.688 ns |
 | `market_line_arbiter` | Implemented, verified, timing closed | +0.298 ns |
 | `checksum` | Planned | |
 | `dedup_egress` | Planned | |

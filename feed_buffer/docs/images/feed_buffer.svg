@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560">
+  <rect width="1000" height="560" fill="#ffffff"/>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#111111"/>
+    </marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#777777"/>
+    </marker>
+  </defs>
+
+  <style>
+    .blk   { fill:none; stroke:#111111; stroke-width:1.6; }
+    .name  { font-family:"DejaVu Sans Mono",monospace; font-size:16px; fill:#111111; }
+    .sub   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:12px; fill:#444444; }
+    .lbl   { font-family:"DejaVu Sans",Arial,sans-serif; font-size:13px; fill:#111111; }
+    .lblg  { font-family:"DejaVu Sans",Arial,sans-serif; font-size:12px; fill:#777777; }
+    .data  { fill:none; stroke:#111111; stroke-width:1.6; marker-end:url(#ar); }
+    .ctrl  { fill:none; stroke:#777777; stroke-width:1.4; marker-end:url(#arg); }
+    .title { font-family:"DejaVu Sans Mono",monospace; font-size:20px; fill:#111111; }
+    .dots  { font-family:"DejaVu Sans",Arial,sans-serif; font-size:26px; fill:#777777; }
+  </style>
+
+  <text class="title" x="40" y="42">FEED_BUFFER</text>
+  <text class="sub"   x="40" y="64">N_FEEDS identical slices. Nothing is shared between them.</text>
+
+  <!-- ============================ slice 0 ============================ -->
+  <rect class="blk" x="330" y="110" width="280" height="70"/>
+  <text class="name" x="470" y="140" text-anchor="middle">slice 0</text>
+  <text class="sub"  x="470" y="160" text-anchor="middle">FIFO, bypass, output register</text>
+
+  <text class="lbl"  x="40" y="140">in_valid[0]</text>
+  <text class="lblg" x="40" y="156">in_data, in_seq, in_sop, in_eop</text>
+  <path class="data" d="M170,135 L328,135"/>
+
+  <path class="ctrl" d="M328,163 L170,163"/>
+  <text class="lblg" x="40" y="180">in_ready[0]</text>
+
+  <path class="data" d="M610,135 L740,135"/>
+  <text class="lbl"  x="748" y="131">out_valid[0]</text>
+  <text class="lblg" x="748" y="147">out_data, out_seq, out_sop, out_eop</text>
+
+  <path class="ctrl" d="M740,163 L612,163"/>
+  <text class="lblg" x="748" y="167">out_ready[0]</text>
+
+  <!-- ============================ slice 1 ============================ -->
+  <rect class="blk" x="330" y="230" width="280" height="70"/>
+  <text class="name" x="470" y="260" text-anchor="middle">slice 1</text>
+  <text class="sub"  x="470" y="280" text-anchor="middle">FIFO, bypass, output register</text>
+
+  <text class="lbl"  x="40" y="260">in_valid[1]</text>
+  <path class="data" d="M170,255 L328,255"/>
+
+  <path class="ctrl" d="M328,283 L170,283"/>
+  <text class="lblg" x="40" y="287">in_ready[1]</text>
+
+  <path class="data" d="M610,255 L740,255"/>
+  <text class="lbl"  x="748" y="259">out_valid[1]</text>
+
+  <path class="ctrl" d="M740,283 L612,283"/>
+  <text class="lblg" x="748" y="287">out_ready[1]</text>
+
+  <!-- ============================= ellipsis ========================== -->
+  <text class="dots" x="470" y="345" text-anchor="middle">. . .</text>
+
+  <!-- ========================= slice N_FEEDS-1 ======================= -->
+  <rect class="blk" x="330" y="380" width="280" height="70"/>
+  <text class="name" x="470" y="410" text-anchor="middle">slice N_FEEDS-1</text>
+  <text class="sub"  x="470" y="430" text-anchor="middle">FIFO, bypass, output register</text>
+
+  <text class="lbl"  x="40" y="409">in_valid[N_FEEDS-1]</text>
+  <path class="data" d="M240,405 L328,405"/>
+
+  <path class="ctrl" d="M328,433 L240,433"/>
+  <text class="lblg" x="40" y="437">in_ready[N_FEEDS-1]</text>
+
+  <path class="data" d="M610,405 L740,405"/>
+  <text class="lbl"  x="748" y="409">out_valid[N_FEEDS-1]</text>
+
+  <path class="ctrl" d="M740,433 L612,433"/>
+  <text class="lblg" x="748" y="437">out_ready[N_FEEDS-1]</text>
+
+  <!-- ======================== invalidate_feed ======================== -->
+  <path class="ctrl" d="M170,500 L300,500 L300,120 L328,120"/>
+  <path class="ctrl" d="M300,240 L328,240"/>
+  <path class="ctrl" d="M300,390 L328,390"/>
+  <text class="lblg" x="40" y="496">invalidate_feed</text>
+  <text class="lblg" x="40" y="512">from MARKET_LINE_ARBITER</text>
+</svg>
