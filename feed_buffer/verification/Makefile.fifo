@@ -1,0 +1,31 @@
+# =============================================================================
+# sync_fifo verification
+#
+#   make -f Makefile.fifo
+# =============================================================================
+
+SIM           ?= verilator
+TOPLEVEL_LANG ?= verilog
+
+PWD := $(shell pwd)
+
+VERILOG_SOURCES += $(PWD)/../rtl/sync_fifo.sv
+
+TOPLEVEL = sync_fifo
+
+# Own build dir so the two suites do not collide.
+SIM_BUILD = sim_build_fifo
+
+MODULE ?= test_fifo
+
+EXTRA_ARGS += -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND
+
+ifeq ($(TRACE),1)
+EXTRA_ARGS += --trace --trace-structs
+endif
+
+include $(shell cocotb-config --makefiles)/Makefile.sim
+
+.PHONY: clean_all
+clean_all: clean
+	rm -rf sim_build sim_build_fifo results.xml dump.vcd __pycache__
