@@ -2,15 +2,29 @@
 
 2. A completion lands in the table, and a later copy of that packet on another
    feed is dropped.
-3. The same-cycle bypass: a copy arriving in the very cycle its completion
+3. The same cycle bypass: a copy arriving in the very cycle its completion
    arrives, before the table write is visible.
 4. Both paths exercised together: a populated table and a live completion, with
    one feed matching each, in the same cycle.
+
+dedup_ingress has one cycle of latency. A beat presented in one cycle is
+observed on the outputs in the next, so every check here steps once to accept
+the beat and once more to look at it. Checking in the same cycle would pass for
+the wrong reason: out_valid is low in that cycle whether the beat was dropped
+or not, because the pipeline register has not loaded yet.
 """
 
 import cocotb
 
-from dedup_ingress_common import DedupIngressTB, N_FEEDS, send_packet
+from dedup_ingress_common import LATENCY, DedupIngressTB, N_FEEDS, send_packet
+
+
+async def observe(tb):
+    """Run LATENCY idle cycles and return the sample the beat appears in."""
+    got = None
+    for _ in range(LATENCY):
+        got = await tb.step()
+    return got
 
 
 @cocotb.test()
@@ -50,7 +64,8 @@ async def test_same_cycle_bypass(dut):
 
     tb.present(1, seq=seq, sop=1)
     tb.complete(seq)
-    got = await tb.step()
+    await tb.step()
+    got = await observe(tb)
 
     assert got["out_valid"][1] == 0, (
         "the bypass did not catch a copy arriving with its own completion"
@@ -58,7 +73,8 @@ async def test_same_cycle_bypass(dut):
 
     # And the entry is in the table from the next cycle on.
     tb.present(2, seq=seq, sop=1)
-    got = await tb.step()
+    await tb.step()
+    got = await observe(tb)
     assert got["out_valid"][2] == 0, "the completion did not persist into the CPT"
 
     await tb.idle(2)
@@ -87,7 +103,8 @@ async def test_table_and_bypass_together(dut):
     tb.present(1, seq=new_seq, sop=1)
     tb.present(2, seq=other_seq, sop=1)
     tb.complete(new_seq)
-    got = await tb.step()
+    await tb.step()
+    got = await observe(tb)
 
     assert got["out_valid"][0] == 0, "table match on feed 0 was not dropped"
     assert got["out_valid"][1] == 0, "bypass match on feed 1 was not dropped"
@@ -109,7 +126,8 @@ async def test_duplicate_on_every_feed(dut):
 
     for feed in range(N_FEEDS):
         tb.present(feed, seq=seq, sop=1)
-    got = await tb.step()
+    await tb.step()
+    got = await observe(tb)
 
     assert got["out_valid"] == [0] * N_FEEDS, (
         f"expected every feed dropped, got {got['out_valid']}"

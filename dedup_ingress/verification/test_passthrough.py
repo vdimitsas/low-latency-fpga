@@ -4,11 +4,16 @@
 7. Completions present, but no arriving seq matches any of them. Still nothing
    is dropped, which is what separates a working comparator from one that
    matches everything.
+
+dedup_ingress has one cycle of latency, so a beat presented in one cycle
+appears on the outputs in the next. send_packet returns beat aligned samples,
+so indexing into its result still means "the output for beat i". Tests that
+drive beats by hand have to sample one cycle later themselves.
 """
 
 import cocotb
 
-from dedup_ingress_common import DedupIngressTB, N_FEEDS, send_packet
+from dedup_ingress_common import LATENCY, DedupIngressTB, N_FEEDS, send_packet
 
 
 @cocotb.test()
@@ -57,16 +62,27 @@ async def test_all_feeds_in_parallel(dut):
     tb = DedupIngressTB(dut)
     await tb.start()
 
-    for beat in range(4):
+    beats = 4
+    samples = []
+
+    for beat in range(beats):
         for feed in range(N_FEEDS):
             tb.present(
                 feed,
                 seq=0x3000 + feed if beat == 0 else None,
                 data=None if beat == 0 else (0xB0 + beat),
                 sop=1 if beat == 0 else 0,
-                eop=1 if beat == 3 else 0,
+                eop=1 if beat == beats - 1 else 0,
             )
-        got = await tb.step()
+        samples.append(await tb.step())
+
+    # drain the last beat out of the pipeline register
+    for _ in range(LATENCY):
+        samples.append(await tb.step())
+
+    # beat b is presented in cycle b and observed in cycle b + LATENCY
+    for beat in range(beats):
+        got = samples[beat + LATENCY]
         assert got["out_valid"] == [1] * N_FEEDS, (
             f"beat {beat}: expected all feeds to pass, got {got['out_valid']}"
         )

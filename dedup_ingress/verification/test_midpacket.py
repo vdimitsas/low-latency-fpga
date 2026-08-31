@@ -8,11 +8,16 @@ like any others and dropped at DEDUP_EGRESS, which is outside this block.
 This is the case that proves the seq register works: the beats after SOP carry
 no sequence number of their own, so the only way they can be matched is from
 the value latched at SOP.
+
+dedup_ingress has one cycle of latency. Each test here drives its beats one per
+cycle, collects the sample from every cycle, runs LATENCY extra cycles to drain
+the last beat out, then checks that the beat driven in cycle i appears in the
+sample from cycle i + LATENCY.
 """
 
 import cocotb
 
-from dedup_ingress_common import DedupIngressTB, seq_into_beat
+from dedup_ingress_common import LATENCY, DedupIngressTB, seq_into_beat
 
 
 @cocotb.test()
@@ -24,6 +29,7 @@ async def test_kill_mid_packet(dut):
     seq = 0x6060
     beats = 5
     kill_on = 2
+    samples = []
 
     for i in range(beats):
         tb.present(
@@ -35,8 +41,13 @@ async def test_kill_mid_packet(dut):
         if i == kill_on:
             tb.complete(seq)
 
-        got = await tb.step()
+        samples.append(await tb.step())
 
+    for _ in range(LATENCY):
+        samples.append(await tb.step())
+
+    for i in range(beats):
+        got = samples[i + LATENCY]
         if i < kill_on:
             assert got["out_valid"][0] == 1, f"beat {i} dropped before the kill"
         else:
@@ -69,6 +80,7 @@ async def test_next_packet_on_that_feed_is_unaffected(dut):
 
     await tb.idle(2)
 
+    samples = []
     for i in range(4):
         tb.present(
             0,
@@ -76,7 +88,13 @@ async def test_next_packet_on_that_feed_is_unaffected(dut):
             sop=1 if i == 0 else 0,
             eop=1 if i == 3 else 0,
         )
-        got = await tb.step()
+        samples.append(await tb.step())
+
+    for _ in range(LATENCY):
+        samples.append(await tb.step())
+
+    for i in range(4):
+        got = samples[i + LATENCY]
         assert got["out_valid"][0] == 1, (
             f"beat {i} of the following packet was dropped"
         )
@@ -92,6 +110,7 @@ async def test_kill_on_one_feed_only(dut):
 
     dying = 0x7070
     living = 0x8080
+    samples = []
 
     for i in range(4):
         tb.present(
@@ -109,8 +128,13 @@ async def test_kill_on_one_feed_only(dut):
         if i == 1:
             tb.complete(dying)
 
-        got = await tb.step()
+        samples.append(await tb.step())
 
+    for _ in range(LATENCY):
+        samples.append(await tb.step())
+
+    for i in range(4):
+        got = samples[i + LATENCY]
         assert got["out_valid"][1] == 1, f"beat {i} of the healthy feed was dropped"
         if i >= 1:
             assert got["out_valid"][0] == 0, f"beat {i} of the dying feed survived"

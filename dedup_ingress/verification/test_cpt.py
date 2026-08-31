@@ -11,11 +11,27 @@
    again. A packet can complete twice, because a copy that got past this block
    before its twin completed is still served and still checksummed. Writing it
    a second time would evict a different, still useful entry for no gain.
+
+dedup_ingress has one cycle of latency, so a beat presented in one cycle is
+observed on the outputs in the next. Every probe here presents the beat, steps
+to accept it, then steps again to look at it. Checking in the same cycle would
+be worthless for the drop cases: out_valid is low in that cycle whether the
+beat was dropped or not, because the pipeline register has not loaded yet.
 """
 
 import cocotb
 
-from dedup_ingress_common import CPT_DEPTH, DedupIngressTB
+from dedup_ingress_common import CPT_DEPTH, LATENCY, DedupIngressTB
+
+
+async def probe(tb, feed, seq):
+    """Present one SOP beat carrying seq and return the cycle it appears in."""
+    tb.present(feed, seq=seq, sop=1)
+    await tb.step()
+    got = None
+    for _ in range(LATENCY):
+        got = await tb.step()
+    return got
 
 
 @cocotb.test()
@@ -31,8 +47,7 @@ async def test_completion_is_written_without_a_match(dut):
     await tb.step()
 
     # Next cycle it must already be in the table.
-    tb.present(0, seq=seq, sop=1)
-    got = await tb.step()
+    got = await probe(tb, 0, seq)
     assert got["out_valid"][0] == 0, (
         "a completion with no concurrent traffic was not written to the CPT"
     )
@@ -54,8 +69,7 @@ async def test_write_pointer_advances(dut):
 
     # Every one of them must still be held: the table is exactly full.
     for seq in seqs:
-        tb.present(0, seq=seq, sop=1)
-        got = await tb.step()
+        got = await probe(tb, 0, seq)
         assert got["out_valid"][0] == 0, (
             f"seq {seq:#x} was lost, the write pointer is not advancing cleanly"
         )
@@ -81,16 +95,14 @@ async def test_table_wraps_and_evicts_oldest(dut):
     await tb.step()
     await tb.idle(2)
 
-    tb.present(0, seq=first, sop=1)
-    got = await tb.step()
+    got = await probe(tb, 0, first)
     assert got["out_valid"][0] == 1, (
         "the oldest entry was not evicted on wrap"
     )
 
     # Everything newer is still held.
     for seq in seqs[1:] + [evictor]:
-        tb.present(1, seq=seq, sop=1)
-        got = await tb.step()
+        got = await probe(tb, 1, seq)
         assert got["out_valid"][1] == 0, (
             f"seq {seq:#x} should still be in the table after one eviction"
         )
@@ -122,8 +134,7 @@ async def test_straggler_outside_the_window(dut):
     await tb.idle(2)
 
     # Its late copy now has nothing to match against.
-    tb.present(3, seq=straggler, sop=1)
-    got = await tb.step()
+    got = await probe(tb, 3, straggler)
     assert got["out_valid"][3] == 1, (
         "expected the evicted straggler to pass through the bounded window"
     )
@@ -158,8 +169,7 @@ async def test_repeated_completion_is_not_rewritten(dut):
 
     # Nothing was evicted: every original entry is still held.
     for seq in seqs:
-        tb.present(0, seq=seq, sop=1)
-        got = await tb.step()
+        got = await probe(tb, 0, seq)
         assert got["out_valid"][0] == 0, (
             f"seq {seq:#x} was evicted by a repeated completion"
         )
@@ -195,8 +205,7 @@ async def test_repeated_completion_leaves_the_pointer_alone(dut):
     await tb.step()
     await tb.idle(2)
 
-    tb.present(0, seq=seqs[0], sop=1)
-    got = await tb.step()
+    got = await probe(tb, 0, seqs[0])
     assert got["out_valid"][0] == 1, (
         "the oldest entry should have been evicted by the new completion"
     )
@@ -204,8 +213,7 @@ async def test_repeated_completion_leaves_the_pointer_alone(dut):
     # The second oldest must survive. It only falls if the repeat moved the
     # pointer and cost an extra eviction.
     for seq in seqs[1:] + [fresh]:
-        tb.present(1, seq=seq, sop=1)
-        got = await tb.step()
+        got = await probe(tb, 1, seq)
         assert got["out_valid"][1] == 0, (
             f"seq {seq:#x} was lost, the pointer moved on a suppressed write"
         )
