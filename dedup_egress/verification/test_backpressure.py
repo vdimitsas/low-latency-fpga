@@ -104,34 +104,37 @@ async def test_drop_lifts_ready_when_downstream_is_full(dut):
 
 @cocotb.test()
 async def test_packet_survives_backpressure(dut):
-    """A whole packet gets through with downstream open every other cycle."""
+    """A whole packet gets through with downstream open every other cycle.
+
+    in_ready is read after the edge, so it is the value for the coming cycle.
+    It is held and used on the next pass, the same way send_packet does it.
+    """
     tb = DedupEgressTB(dut)
     await tb.start()
 
     seq = 0x7A7A
     beats = 4
     samples = []
+    in_ready = 1
+    i = 0
     cycle = 0
 
-    for i in range(beats):
-        # Offer the beat until it is taken. out_ready alternates, so it is
-        # refused about half the time.
-        while True:
-            tb.out_ready = cycle % 2
-            tb.present(
-                seq=seq,
-                data=0xB0 + i,
-                sop=1 if i == 0 else 0,
-                eop=1 if i == beats - 1 else 0,
-            )
-            got = await tb.step()
-            cycle += 1
-            if got["in_ready"]:
-                break
-
-        tb.out_ready = 1
-        samples.append(await tb.step())
+    while i < beats:
+        tb.out_ready = cycle % 2
+        tb.present(
+            seq=seq,
+            data=0xB0 + i,
+            sop=1 if i == 0 else 0,
+            eop=1 if i == beats - 1 else 0,
+        )
+        got = await tb.step()
         cycle += 1
+
+        if in_ready:
+            samples.append(got)
+            i += 1
+
+        in_ready = got["in_ready"]
 
     for i, s in enumerate(samples):
         assert s["out_valid"] == 1, f"beat {i} was lost under backpressure"

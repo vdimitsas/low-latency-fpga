@@ -6,11 +6,8 @@
 4. Both paths live in the same cycle: a beat matching the table while a
    completion for a different sequence number arrives.
 
-dedup_egress has one cycle of latency. A beat presented in one cycle is
-observed on the outputs in the next, so every check here steps once to accept
-the beat and once more to look at it. Checking in the same cycle would pass for
-the wrong reason: out_valid is low in that cycle whether the beat was dropped
-or not, because the pipeline register has not loaded yet.
+step reads the DUT after the clock edge, so the beat presented in a call is
+already on the outputs when that call returns.
 """
 
 import cocotb
@@ -51,7 +48,6 @@ async def test_same_cycle_bypass(dut):
 
     tb.present(seq=seq, sop=1)
     tb.complete(seq)
-    await tb.step()
     got = await tb.step()
     assert got["out_valid"] == 0, (
         "the bypass did not catch a copy arriving with its own completion"
@@ -59,7 +55,6 @@ async def test_same_cycle_bypass(dut):
 
     # And the entry is in the table from the next cycle on.
     tb.present(seq=seq, sop=1)
-    await tb.step()
     got = await tb.step()
     assert got["out_valid"] == 0, "the completion did not persist into the CPT"
 
@@ -84,13 +79,11 @@ async def test_table_and_bypass_together(dut):
 
     tb.present(seq=old_seq, sop=1)
     tb.complete(new_seq)
-    await tb.step()
     got = await tb.step()
     assert got["out_valid"] == 0, "table match was not dropped"
 
     # new_seq went into the table on that same edge.
     tb.present(seq=new_seq, sop=1)
-    await tb.step()
     got = await tb.step()
     assert got["out_valid"] == 0, "the completion was not written to the table"
 
@@ -103,6 +96,5 @@ async def test_unrelated_seq_survives_a_live_completion(dut):
 
     tb.present(seq=0x0C0C, sop=1)
     tb.complete(0x0D0D)
-    await tb.step()
     got = await tb.step()
     assert got["out_valid"] == 1, "a non-matching beat was dropped by the bypass"

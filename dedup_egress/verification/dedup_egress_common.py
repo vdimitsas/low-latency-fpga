@@ -5,24 +5,22 @@ packed two dimensional ports, so cocotb drives it directly.
 
 dedup_egress has one pipeline stage. The comparison against the table runs in
 the cycle a beat is presented, and the beat plus its match results register
-together. The outputs are combinational functions of that register, so a beat
-presented in cycle N appears on the outputs in cycle N+1.
+together. The outputs are combinational functions of that register.
 
-The ready path is still combinational: in_ready is driven by the registered
-state and out_ready, so the upstream sees the decision in the same cycle.
+step drives the inputs to the DUT and the model at the same point, then waits
+for the clock edge and reads at the ReadOnly phase, once the simulator has
+settled. So the outputs it returns belong to the beat driven that cycle, and
+in_ready belongs to the cycle that has just started.
 
 The sequence number is not extracted from the payload here. It arrives on
 in_seq, put there by DEDUP_INGRESS, so every beat carries one.
-
-Outputs are read at the ReadOnly phase, which is the end of the cycle, after
-the simulator has settled the combinational logic.
 """
 
 import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ReadOnly, RisingEdge, Timer
+from cocotb.triggers import NextTimeStep, ReadOnly, RisingEdge
 
 # Must match the parameters the DUT is elaborated with.
 DATA_W = int(os.environ.get("DATA_W", 64))
@@ -38,9 +36,9 @@ DATA_MASK = (1 << DATA_W) - 1
 class GoldenDedupEgress:
     """Reference model of dedup_egress, cycle accurate.
 
-    Call `evaluate` to get this cycle's outputs, then
-    `registers_and_tables_update` with this cycle's inputs to move the state
-    across the clock edge.
+    Call `drive` with this cycle's inputs, then `evaluate`. `evaluate` moves
+    the state across the clock edge and returns the outputs after it, so the
+    values it returns belong to the beat just driven.
 
     State held across the edge:
 
@@ -54,6 +52,16 @@ class GoldenDedupEgress:
         self.reset()
 
     def reset(self):
+        # this cycle's inputs, put here by drive
+        self.in_valid = 0
+        self.in_data = 0
+        self.in_seq = 0
+        self.in_sop = 0
+        self.in_eop = 0
+        self.out_ready = 0
+        self.cmpl_valid = 0
+        self.cmpl_seq = 0
+
         self.cpt_seq = [0] * self.cpt_depth
         self.cpt_occupied = [0] * self.cpt_depth
         self.cpt_wr_ptr = 0
@@ -66,18 +74,28 @@ class GoldenDedupEgress:
         self.cpt_match_q = 0
         self.bypass_match_q = 0
 
+    def drive(self, in_valid, in_data, in_seq, in_sop, in_eop, out_ready,
+              cmpl_valid, cmpl_seq):
+        """Put this cycle's inputs on the model, the way wires hold them."""
+        self.in_valid = in_valid
+        self.in_data = in_data & DATA_MASK
+        self.in_seq = in_seq & SEQ_MASK
+        self.in_sop = in_sop
+        self.in_eop = in_eop
+        self.out_ready = out_ready
+        self.cmpl_valid = cmpl_valid
+        self.cmpl_seq = cmpl_seq & SEQ_MASK
+
     # -- combinational, this cycle's inputs ---------------------------------
 
-    def _matches(self, in_seq, cmpl_valid, cmpl_seq):
-        """Match results this cycle, against the current table."""
-        seq = in_seq & SEQ_MASK
-
+    def _matches(self):
+        """Match results this cycle, against the table as it stands now."""
         cpt_match = 0
         for e in range(self.cpt_depth):
-            if self.cpt_occupied[e] and self.cpt_seq[e] == seq:
+            if self.cpt_occupied[e] and self.cpt_seq[e] == self.in_seq:
                 cpt_match = 1
 
-        if cmpl_valid and (cmpl_seq & SEQ_MASK) == seq:
+        if self.cmpl_valid and self.cmpl_seq == self.in_seq:
             bypass_match = 1
         else:
             bypass_match = 0
@@ -91,65 +109,59 @@ class GoldenDedupEgress:
             return 1
         return 0
 
-    def _in_ready(self, out_ready):
-        if (not self.valid_q) or out_ready or self._drop():
+    def _in_ready(self):
+        if (not self.valid_q) or self.out_ready or self._drop():
             return 1
         return 0
 
-    def evaluate(self, out_ready):
-        """Outputs presented during this cycle.
+    def evaluate(self):
+        """Move across the clock edge, then report the outputs after it.
 
-        Everything here comes from the registered state. This cycle's inputs
-        do not reach the outputs until the next cycle, so out_ready is the
-        only input needed here: it feeds the ready path combinationally.
+        in_ready and the match results are combinational, so they are computed
+        from the flops and the table before either is written. The flops then
+        load, and the outputs are read from them. So the returned outputs
+        belong to the beat just driven, and in_ready belongs to the cycle that
+        starts after the edge.
         """
+        in_ready = self._in_ready()
+        cpt_match, bypass_match = self._matches()
+
+        # the cut: valid follows in_ready alone, payload follows the handshake
+        if in_ready:
+            self.valid_q = 1 if self.in_valid else 0
+
+        if self.in_valid and in_ready:
+            self.data_q = self.in_data
+            self.sop_q = self.in_sop
+            self.eop_q = self.in_eop
+            self.seq_q = self.in_seq
+            self.cpt_match_q = cpt_match
+            self.bypass_match_q = bypass_match
+
+        # completed packets table, suppressed when the value is already held
+        if self.cmpl_valid:
+            already_held = any(
+                self.cpt_occupied[e] and self.cpt_seq[e] == self.cmpl_seq
+                for e in range(self.cpt_depth)
+            )
+            if not already_held:
+                self.cpt_seq[self.cpt_wr_ptr] = self.cmpl_seq
+                self.cpt_occupied[self.cpt_wr_ptr] = 1
+                self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
+
         if self.valid_q and not self._drop():
             out_valid = 1
         else:
             out_valid = 0
 
         return {
-            "in_ready": self._in_ready(out_ready),
+            "in_ready": self._in_ready(),
             "out_valid": out_valid,
             "out_data": self.data_q,
             "out_sop": self.sop_q,
             "out_eop": self.eop_q,
             "out_seq": self.seq_q,
         }
-
-    def registers_and_tables_update(self, in_valid, in_data, in_seq, in_sop,
-                                    in_eop, out_ready, cmpl_valid, cmpl_seq):
-        """Move the state across the clock edge.
-
-        This is the model's clock edge. The registered beat loads, and the
-        completed packets table takes any completion arriving this cycle.
-        """
-        in_ready = self._in_ready(out_ready)
-        cpt_match, bypass_match = self._matches(in_seq, cmpl_valid, cmpl_seq)
-
-        # the cut: valid follows in_ready alone, payload follows the handshake
-        if in_ready:
-            self.valid_q = 1 if in_valid else 0
-
-        if in_valid and in_ready:
-            self.data_q = in_data & DATA_MASK
-            self.sop_q = in_sop
-            self.eop_q = in_eop
-            self.seq_q = in_seq & SEQ_MASK
-            self.cpt_match_q = cpt_match
-            self.bypass_match_q = bypass_match
-
-        # completed packets table, suppressed when the value is already held
-        if cmpl_valid:
-            seq = cmpl_seq & SEQ_MASK
-            already_held = any(
-                self.cpt_occupied[e] and self.cpt_seq[e] == seq
-                for e in range(self.cpt_depth)
-            )
-            if not already_held:
-                self.cpt_seq[self.cpt_wr_ptr] = seq
-                self.cpt_occupied[self.cpt_wr_ptr] = 1
-                self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
 
 
 class DedupEgressTB:
@@ -219,28 +231,40 @@ class DedupEgressTB:
     async def start(self):
         """Start the clock and hold reset for a few cycles."""
         cocotb.start_soon(Clock(self.dut.clk, CLK_PERIOD_NS, "ns").start())
-        await Timer(1, "ns")
+
         self.clear()
         self.dut.rst_n.value = 0
         self._apply()
-        await Timer(CLK_PERIOD_NS * 5, "ns")
+
+        for _ in range(5):
+            await RisingEdge(self.dut.clk)
+
         self.dut.rst_n.value = 1
         await RisingEdge(self.dut.clk)
         self.golden.reset()
 
     async def step(self):
-        """Run one cycle: drive the staged stimulus, settle, sample, advance.
+        """Run one cycle and return the DUT outputs read after the edge.
 
-        Returns the sampled outputs for that cycle. The stimulus is cleared
-        afterwards so each cycle must be staged explicitly.
-
-        The outputs sampled here belong to the beat accepted on the previous
-        edge, not to the stimulus staged for this cycle.
+        The inputs reach the DUT and the model at the same point. The read
+        happens after the clock edge, so out_data and the rest show the beat
+        driven this cycle, and in_ready is the value for the cycle that has
+        just started.
         """
         self._apply()
+        self.golden.drive(
+            in_valid=self.in_valid,
+            in_data=self.in_data,
+            in_seq=self.in_seq,
+            in_sop=self.in_sop,
+            in_eop=self.in_eop,
+            out_ready=self.out_ready,
+            cmpl_valid=self.cmpl_valid,
+            cmpl_seq=self.cmpl_seq,
+        )
+        expected = self.golden.evaluate()
 
-        expected = self.golden.evaluate(out_ready=self.out_ready)
-
+        await RisingEdge(self.dut.clk)
         await ReadOnly()
         got = self.sample()
 
@@ -270,57 +294,40 @@ class DedupEgressTB:
                 f"expected {expected['out_eop']}"
             )
 
-        await RisingEdge(self.dut.clk)
-
-        self.golden.registers_and_tables_update(
-            in_valid=self.in_valid,
-            in_data=self.in_data,
-            in_seq=self.in_seq,
-            in_sop=self.in_sop,
-            in_eop=self.in_eop,
-            out_ready=self.out_ready,
-            cmpl_valid=self.cmpl_valid,
-            cmpl_seq=self.cmpl_seq,
-        )
-
         self.cmpl_valid = 0
         self.cmpl_seq = 0
         self.idle_stream()
 
+        # leave the read only region, otherwise the next call cannot drive
+        await NextTimeStep()
+
         return got
 
 
-async def send_packet(tb, seq, beats, out_ready=None):
-    """Stream a whole packet back to back, returning one sample per beat.
+async def send_packet(tb, seq, beats):
+    """Stream a whole packet, returning one sample per beat.
 
-    A beat is re-presented until in_ready is high, so the packet survives
-    backpressure. The sample for a beat is read on the following cycle, while
-    the next beat is already being driven, so no idle cycle is inserted.
+    in_ready is read after the edge, so it is the value for the coming cycle.
+    It is held and used on the next pass to decide whether the beat that was
+    just driven was taken. A refused beat is presented again.
     """
     samples = []
-    pending = False
+    in_ready = 1          # the stage starts empty, so the first beat is taken
+    i = 0
 
-    for i in range(beats):
-        while True:
-            if out_ready is not None:
-                tb.out_ready = out_ready
-            tb.present(
-                seq=seq,
-                data=0xA0 + i,
-                sop=1 if i == 0 else 0,
-                eop=1 if i == beats - 1 else 0,
-            )
-            got = await tb.step()
-            if pending:
-                samples.append(got)
-                pending = False
-            if got["in_ready"]:
-                pending = True
-                break
+    while i < beats:
+        tb.present(
+            seq=seq,
+            data=0xA0 + i,
+            sop=1 if i == 0 else 0,
+            eop=1 if i == beats - 1 else 0,
+        )
+        got = await tb.step()
 
-    # one more cycle so the last beat reaches the outputs
-    if out_ready is not None:
-        tb.out_ready = out_ready
-    samples.append(await tb.step())
+        if in_ready:
+            samples.append(got)
+            i += 1
+
+        in_ready = got["in_ready"]
 
     return samples

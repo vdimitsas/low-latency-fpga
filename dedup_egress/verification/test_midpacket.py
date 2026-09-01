@@ -9,8 +9,8 @@ normally lands before the copy starts. It is tested anyway, because the block
 must not depend on that ordering holding.
 
 The beats are driven by hand, one per cycle, so they go back to back with no
-gap. dedup_egress has one pipeline register, so the beat driven in cycle i
-appears in the sample from cycle i + 1.
+gap. step reads the DUT after the clock edge, so entry i of samples is the
+output for beat i.
 """
 
 import cocotb
@@ -41,11 +41,8 @@ async def test_kill_mid_packet(dut):
 
         samples.append(await tb.step())
 
-    # one more cycle to push the last beat out of the pipeline register
-    samples.append(await tb.step())
-
     for i in range(beats):
-        got = samples[i + 1]
+        got = samples[i]
         if i < kill_on:
             assert got["out_valid"] == 1, f"beat {i} dropped before the kill"
         else:
@@ -74,9 +71,6 @@ async def test_next_packet_is_unaffected(dut):
             tb.complete(dead)
         await tb.step()
 
-    # one more cycle so the last beat reaches the outputs
-    await tb.step()
-
     samples = []
     for i in range(4):
         tb.present(
@@ -87,11 +81,8 @@ async def test_next_packet_is_unaffected(dut):
         )
         samples.append(await tb.step())
 
-    # one more cycle to push the last beat out of the pipeline register
-    samples.append(await tb.step())
-
     for i in range(4):
-        got = samples[i + 1]
+        got = samples[i]
         assert got["out_valid"] == 1, (
             f"beat {i} of the following packet was dropped"
         )

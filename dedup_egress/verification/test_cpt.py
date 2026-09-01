@@ -13,11 +13,8 @@
    Writing it a second time would evict a different, still useful entry for no
    gain.
 
-dedup_egress has one cycle of latency, so a beat presented in one cycle is
-observed on the outputs in the next. Every probe here presents the beat, steps
-to accept it, then steps again to look at it. Checking in the same cycle would
-be worthless for the drop cases: out_valid is low in that cycle whether the
-beat was dropped or not, because the pipeline register has not loaded yet.
+step reads the DUT after the clock edge, so the beat presented in a call is
+already on the outputs when that call returns. One step per probe.
 """
 
 import cocotb
@@ -28,7 +25,6 @@ from dedup_egress_common import CPT_DEPTH, DedupEgressTB
 async def probe(tb, seq):
     """Present one SOP beat carrying seq and return the cycle it appears in."""
     tb.present(seq=seq, sop=1)
-    await tb.step()
     return await tb.step()
 
 
