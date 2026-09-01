@@ -66,7 +66,7 @@ CHECKSUM validates the served packet. Its result is the definition of success fo
 
 CHECKSUM restarts its accumulator on any SOP, not only on the SOP that follows an EOP. This matters because the arbiter can forward a fragment. A packet killed mid-flight by DEDUP_INGRESS leaves beats in FEED_BUFFER with no EOP behind them, and the arbiter serves those beats and then continues into the next packet on that feed. Restarting on SOP means the fragment is abandoned the moment the next real packet begins, so the packet behind it is checksummed on its own. The fragment never reaches an EOP, so it never produces a completion.
 
-DEDUP_EGRESS is the last stage before the output. It holds the same kind of table as DEDUP_INGRESS and drops any beat whose sequence number has already completed. Two things reach it: fragments of packets killed upstream, and whole copies that were already being drained from FEED_BUFFER when their twin completed. Neither can be stopped earlier, because the completion always arrives after the decision to forward has been made. Like DEDUP_INGRESS it needs no drop state, because every beat carries its own sequence number: a fragment's beats match the table and die, and the next packet's beats carry a different sequence number and pass.
+DEDUP_EGRESS is the last stage before the output. It holds the same kind of table as DEDUP_INGRESS and drops any beat whose sequence number has already completed. What reaches it is traffic that got past DEDUP_INGRESS because the completion arrived too late to stop it. A copy of a packet is streaming through, and the completion for an identical packet, same sequence number on another feed, lands afterwards. If it lands while the copy is still crossing DEDUP_INGRESS, the rest of that copy is cut and a fragment goes on. If it lands after the copy has fully passed, the whole copy goes on. Either way it ends up here. Neither block remembers a decision from one beat to the next. Each beat is judged on its own sequence number, so a fragment's beats match the table and die, and the next packet's beats carry a different sequence number and pass. DEDUP_INGRESS latches that sequence number at SOP and holds it for the packet, while DEDUP_EGRESS receives it on every beat.
 
 Satellite logic
 
@@ -166,7 +166,7 @@ Integration. Once several stages exist, they will be verified together end to en
 
 8. Future work
 
-Remaining stages. CHECKSUM, DEDUP_EGRESS, FIX_TRACKER and TIMER are specified but not implemented. Each will be built the same way as the stages already done: designed, verified against a golden model, and timing closed on its own before integration. End to end verification of the assembled pipeline follows after that.
+Remaining stages. CHECKSUM, FIX_TRACKER and TIMER are specified but not implemented. Each will be built the same way as the stages already done: designed, verified against a golden model, and timing closed on its own before integration. End to end verification of the assembled pipeline follows after that.
 
 Feed count coverage. The verification suites currently run at four feeds. Running them across other values is needed before the design can be called parameterisable in feed count.
 

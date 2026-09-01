@@ -15,8 +15,8 @@ is wired together.
 | `dedup_ingress` | Implemented, verified, timing closed | +0.240 ns |
 | `feed_buffer` | Implemented, verified, timing closed | +0.688 ns |
 | `market_line_arbiter` | Implemented, verified, timing closed | +0.298 ns |
+| `dedup_egress` | Implemented, verified, timing closed | +0.257 ns |
 | `checksum` | Planned | |
-| `dedup_egress` | Planned | |
 | `fix_tracker` | Planned | |
 | `timer` | Planned | |
 
@@ -34,6 +34,7 @@ udp_parser/
 ├── dedup_ingress/        # duplicate removal at the head of the pipeline
 ├── feed_buffer/          # per feed FIFO storage
 ├── market_line_arbiter/  # redundant feed arbitration
+├── dedup_egress/         # duplicate removal at the tail of the pipeline
 ├── LICENSE
 └── README.md
 ```
