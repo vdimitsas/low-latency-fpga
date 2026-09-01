@@ -46,6 +46,8 @@ Stages
 
 DEDUP_INGRESS sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. It is also where the sequence number is extracted: the field arrives only in the first beat of a packet, so DEDUP_INGRESS slices it out, holds it for the rest of the packet, and presents it alongside every beat it forwards.
 
+One cycle of latency through this stage. The sequence comparison and the drop decision did not fit in a single cycle at 325 MHz, so they are split by a register.
+
 FEED_BUFFER provides per-feed FIFO storage. The arbiter serves one feed at a time, so without buffering here the unselected feeds would immediately backpressure their sources. The FIFOs absorb incoming traffic while a feed waits its turn, and backpressure only propagates upstream when a FIFO genuinely fills.
 
 The buffer is bypassed when it is not needed. If a feed's FIFO is empty and the arbiter is ready to accept, the data is forwarded straight through rather than written and read back, saving a cycle on the common path. This applies independently to every feed, so all feeds that can be forwarded are forwarded. Buffering begins as soon as the arbiter stops accepting, and once a FIFO holds data it keeps draining in order until empty, so ordering is never mixed between the bypass and stored paths.

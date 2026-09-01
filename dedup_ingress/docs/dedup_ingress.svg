@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640">
-  <rect width="1000" height="640" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="660" viewBox="0 0 1260 660">
+  <rect width="1260" height="660" fill="#ffffff"/>
 
   <defs>
     <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
@@ -19,50 +19,79 @@
     .data  { fill:none; stroke:#111111; stroke-width:1.6; marker-end:url(#ar); }
     .ctrl  { fill:none; stroke:#777777; stroke-width:1.4; marker-end:url(#arg); }
     .plain { fill:none; stroke:#777777; stroke-width:1.4; }
+    .cut   { fill:none; stroke:#777777; stroke-width:1.2; stroke-dasharray:6 5; }
     .title { font-family:"DejaVu Sans Mono",monospace; font-size:20px; fill:#111111; }
   </style>
 
   <text class="title" x="40" y="44">DEDUP_INGRESS</text>
 
-  <!-- completed_seq input -->
-  <text class="lblg" x="40" y="288">completed_seq</text>
-  <text class="lblg" x="40" y="306">(from CHECKSUM)</text>
-  <path class="plain" d="M40,320 L215,320"/>
-  <circle cx="215" cy="320" r="4.5" fill="#777777"/>
+  <!-- cycle boundary: on the arrow from the register to the drop logic -->
+  <path class="cut" d="M1036,240 L1036,470"/>
+  <text class="lblg" x="1000" y="232" text-anchor="end">cycle N</text>
+  <text class="lblg" x="1072" y="232">cycle N+1</text>
 
-  <!-- fork: up and across to the tree (same-cycle bypass) -->
-  <path class="ctrl" d="M215,320 L215,120 L695,120"/>
-  <text class="lblg" x="420" y="110">same-cycle bypass</text>
+  <!-- in_ready back to upstream, along the top, pointing left -->
+  <path class="ctrl" d="M1139,300 L1139,90 L40,90"/>
+  <text class="lblg" x="590" y="82" text-anchor="middle">in_ready to upstream: out_ready OR drop, combinational</text>
 
-  <!-- fork: into CPT -->
-  <path class="ctrl" d="M215,320 L265,320"/>
+  <!-- cmpl_seq input -->
+  <text class="lblg" x="40" y="300">cmpl_seq</text>
+  <text class="lblg" x="40" y="318">(from CHECKSUM)</text>
+  <path class="plain" d="M40,332 L180,332"/>
+  <circle cx="180" cy="332" r="4.5" fill="#777777"/>
+
+  <!-- same cycle bypass -->
+  <path class="ctrl" d="M180,332 L180,190 L640,190 L640,310 L676,310"/>
+  <text class="lblg" x="400" y="182">same-cycle bypass</text>
+
+  <!-- into CPT -->
+  <path class="ctrl" d="M180,332 L236,332"/>
 
   <!-- CPT -->
-  <rect class="blk" x="270" y="268" width="210" height="104"/>
-  <text class="name" x="375" y="308" text-anchor="middle">CPT</text>
-  <text class="sub"  x="375" y="330" text-anchor="middle">completed packets table</text>
-  <text class="sub"  x="375" y="350" text-anchor="middle">circular, DEPTH=8</text>
-  <path class="ctrl" d="M480,320 L695,320"/>
+  <rect class="blk" x="240" y="280" width="200" height="104"/>
+  <text class="name" x="340" y="320" text-anchor="middle">CPT</text>
+  <text class="sub"  x="340" y="342" text-anchor="middle">completed packets table</text>
+  <text class="sub"  x="340" y="362" text-anchor="middle">circular, DEPTH=8</text>
+  <path class="ctrl" d="M440,332 L676,332"/>
 
   <!-- SEQ_REGS -->
-  <rect class="blk" x="270" y="420" width="210" height="104"/>
-  <text class="name" x="375" y="460" text-anchor="middle">SEQ_REGS</text>
-  <text class="sub"  x="375" y="482" text-anchor="middle">one seq per feed,</text>
-  <text class="sub"  x="375" y="502" text-anchor="middle">written at SOP</text>
-  <path class="ctrl" d="M480,472 L695,472"/>
+  <rect class="blk" x="240" y="440" width="200" height="104"/>
+  <text class="name" x="340" y="476" text-anchor="middle">SEQ_REGS</text>
+  <text class="sub"  x="340" y="498" text-anchor="middle">one seq per feed,</text>
+  <text class="sub"  x="340" y="518" text-anchor="middle">written on valid SOP</text>
+  <path class="ctrl" d="M440,492 L620,492 L620,356 L676,356"/>
 
   <!-- feed inputs -->
-  <text class="lbl" x="40" y="574">N feeds in</text>
-  <path class="data" d="M40,590 L695,590"/>
-  <circle cx="375" cy="590" r="4.5" fill="#111111"/>
-  <path class="ctrl" d="M375,590 L375,529"/>
+  <text class="lbl" x="40" y="586">N feeds in</text>
+  <path class="plain" d="M40,602 L340,602"/>
+  <circle cx="340" cy="602" r="4.5" fill="#111111"/>
+  <path class="ctrl" d="M340,602 L340,549"/>
+  <path class="data" d="M340,602 L960,602 L960,442"/>
 
-  <!-- comparator tree -->
-  <rect class="blk" x="700" y="90" width="150" height="520"/>
-  <text class="name" x="775" y="342" text-anchor="middle">COMPARATOR</text>
-  <text class="name" x="775" y="364" text-anchor="middle">TREE</text>
+  <!-- COMPARE -->
+  <rect class="blk" x="680" y="290" width="130" height="86"/>
+  <text class="name" x="745" y="322" text-anchor="middle">COMPARE</text>
+  <text class="sub"  x="745" y="344" text-anchor="middle">cpt_match</text>
+  <text class="sub"  x="745" y="362" text-anchor="middle">bypass_match</text>
+
+  <!-- COMPARE into the register -->
+  <path class="data" d="M810,333 L860,333 L860,370 L902,370"/>
+
+  <!-- pipeline register -->
+  <rect class="blk" x="908" y="290" width="104" height="146"/>
+  <text class="name" x="960" y="330" text-anchor="middle">PIPE</text>
+  <text class="name" x="960" y="352" text-anchor="middle">REG</text>
+
+  <!-- register into drop -->
+  <path class="data" d="M1012,352 L1060,352"/>
+
+  <!-- drop -->
+  <rect class="blk" x="1064" y="300" width="150" height="104"/>
+  <text class="name" x="1139" y="340" text-anchor="middle">DROP</text>
+  <text class="sub"  x="1139" y="362" text-anchor="middle">OR reduction,</text>
+  <text class="sub"  x="1139" y="382" text-anchor="middle">out_valid, in_ready</text>
 
   <!-- output -->
-  <path class="data" d="M850,350 L960,350"/>
-  <text class="lbl" x="866" y="336">N feeds out</text>
+  <path class="data" d="M1214,352 L1250,352"/>
+  <text class="lbl" x="1150" y="288">N feeds out</text>
 </svg>

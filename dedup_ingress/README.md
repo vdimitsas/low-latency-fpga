@@ -15,10 +15,14 @@ the pipeline.
 
 ## Behaviour
 
-The datapath is cut-through: data, boundary markers and the sequence number
-pass from input port to output port in the same cycle, with no register in
-between. The only thing the block does to the stream is withhold `out_valid` on
-a feed whose packet has already completed.
+The datapath has one pipeline register. A beat and its comparison results are
+registered together, so a beat presented on `in_data` appears on `out_data` one
+cycle later. The only thing the block does to the stream is withhold
+`out_valid` on a feed whose packet has already completed.
+
+The register exists for timing. The comparator tree, the drop decision and the
+ready path in one cycle did not close at 325 MHz. Section 6 of the design
+document has the numbers.
 
 The sequence number arrives only in the first beat of a packet. It is sliced out
 combinationally, held for the rest of the packet, and re-emitted on `out_seq`,
@@ -31,7 +35,7 @@ How each of those works is in
 
 ## Timing
 
-Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.179 ns**
+Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.240 ns**
 post synthesis. The worst path, and why this block needs a synthesis harness to
 be measured at all, are in
 [`docs/dedup_ingress_design.md`](docs/dedup_ingress_design.md), section 6.
@@ -43,7 +47,7 @@ cd sta && vivado -mode batch -source run.tcl
 ## Verification
 
 ```bash
-cd verification && make   # 23 tests
+cd verification && make   # 24 tests
 ```
 
 Directed tests cover passthrough, the drop, the same cycle bypass, the completed

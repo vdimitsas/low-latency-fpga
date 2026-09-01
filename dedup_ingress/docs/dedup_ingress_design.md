@@ -38,12 +38,16 @@ discarded with it, and a packet that was still recoverable would be lost.
 Invalidation stays scoped to the feed it happened on, and `feed_buffer` handles
 it with a sticky per feed drop.
 
-DEDUP_INGRESS does not reorder and does not buffer. It never stalls on its own account:
-no internal condition, full table included, ever holds up a feed. It does pass
-backpressure through, so when `out_ready` goes low on a feed, that feed's
-`in_ready` follows and upstream is held off. It has no view of packet order or
-gaps in the sequence. Detecting a missing packet belongs to FIX_TRACKER and
-TIMER, not here.
+DEDUP_INGRESS does not reorder. It holds one beat per feed in a pipeline
+register, added for timing. There is no FIFO and no queue.
+
+The block never originates a stall. No internal condition, full table included,
+holds up a feed. Every stall it applies comes from downstream: when `out_ready`
+goes low on a feed that is holding a beat, that feed's `in_ready` follows and
+upstream is held off. A feed holding nothing accepts regardless.
+
+It has no view of packet order or gaps in the sequence. Detecting a missing
+packet belongs to FIX_TRACKER and TIMER, not here.
 
 ## 2. Interface
 
@@ -112,21 +116,17 @@ out combinationally at `SEQ_OFFSET` with width `SEQ_W`, giving
 
 Later beats of the same packet carry no sequence number, so the value has to be
 kept. `seq_regs[f]` holds the sequence number of the packet currently on feed
-f. It is written when a SOP beat is accepted, that is when
-`in_valid[f] && in_ready[f] && in_sop[f]`, and it holds until the next accepted
-SOP on that feed.
+f. It is written on any valid SOP beat, that is when
+`in_valid[f] && in_sop[f]`, without consulting `in_ready`. Section 5 covers
+why. It holds until the next SOP on that feed.
 
 The value used for comparison in a given cycle is `seq_sel[f]`. On an SOP beat
 it is the freshly extracted value, because `seq_regs[f]` has not been written
 yet. On every other beat it is `seq_regs[f]`.
 
 ```
-seq_sel_valid[f] = in_valid[f];
-seq_sel[f]       = in_sop[f] ? seq_extract[f] : seq_regs[f];
+seq_sel[f] = in_sop[f] ? seq_extract[f] : seq_regs[f];
 ```
-
-`seq_sel_valid[f]` is simply `in_valid[f]`. A feed with no beat this cycle has
-nothing to compare, whatever its register happens to hold.
 
 ### Completed packets table
 
@@ -164,7 +164,6 @@ this cycle.
 ```
 cpt_match[f][e] = cpt_occupied[e] && (cpt_seq[e] == seq_sel[f]);
 bypass_match[f] = cmpl_valid && (cmpl_seq == seq_sel[f]);
-drop[f]         = seq_sel_valid[f] && (|cpt_match[f] || bypass_match[f]);
 ```
 
 The second term is the same-cycle bypass. A completion is not readable in the
@@ -175,23 +174,55 @@ This is the widest logic in the block: `N_FEEDS * (CPT_DEPTH + 1)` equality
 comparisons of `SEQ_W` bits each, all in parallel. Each feed's comparisons are
 independent of every other feed's.
 
+The results are registered. The drop decision is made in the next cycle, from
+the registered results, and the subsection below covers that.
+
+### The pipeline cut
+
+The comparator results are registered together with the beat they belong to.
+
+```
+valid_q[f]        <= in_valid[f];   // enabled by in_ready
+data_q[f]         <= in_data[f];    // enabled by in_valid && in_ready
+seq_q[f]          <= seq_sel[f];
+cpt_match_q[f]    <= cpt_match[f];
+bypass_match_q[f] <= bypass_match[f];
+```
+
+The drop decision is then one OR reduction on the far side:
+
+```
+drop[f] = valid_q[f] && (|cpt_match_q[f] || bypass_match_q[f]);
+```
+
+This splits the block into two cycles. The comparators run in the cycle a beat
+is presented. The OR reduction, the drop, the ready path and the outputs run in
+the next. The wide equality comparisons and the logic that depends on them no
+longer share a cycle.
+
+`valid_q` is enabled by `in_ready` alone. When `in_ready` is high and
+`in_valid` is low, `valid_q` takes a zero and the stage goes empty. The payload
+and the match results are enabled by `in_valid && in_ready`, so a held beat and
+its results stay stable together across a stall.
+
 ## 4. Behaviour
 
-### Zero latency datapath
+### One cycle datapath
 
-There is no register between input and output. `out_data`, `out_sop` and
-`out_eop` are the input signals, unchanged. `out_seq` is `seq_sel`. A beat
-presented on `in_data[f]` appears on `out_data[f]` in the same cycle.
+One register sits between input and output. `out_data`, `out_sop` and
+`out_eop` are the registered input signals, unchanged in value. `out_seq` is
+`seq_q`. A beat presented on `in_data[f]` appears on `out_data[f]` one cycle
+later.
 
 The only thing DEDUP_INGRESS does to the stream is withhold `out_valid[f]` when that
 feed's copy is being dropped:
 
 ```
-out_valid[f] = in_valid[f] && !drop[f];
+out_valid[f] = valid_q[f] && !drop[f];
 ```
 
-The registers in the block, `seq_regs`, `cpt_seq`, `cpt_occupied` and
-`cpt_wr_ptr`, hold state. None of them is in the datapath.
+The other registers in the block, `seq_regs`, `cpt_seq`, `cpt_occupied` and
+`cpt_wr_ptr`, hold state and are not in the datapath.
 
 ### The drop decision
 
@@ -209,8 +240,9 @@ only readable in the table from cycle N+1. Without the bypass, a copy arriving
 in cycle N alongside its own completion would be forwarded, and only the copies
 from N+1 onwards would be dropped.
 
-The bypass compares `seq_sel[f]` against `cmpl_seq` directly, so the drop takes
-effect in the same cycle the completion arrives.
+The bypass compares `seq_sel[f]` against `cmpl_seq` directly, in the same cycle
+the completion arrives. The result is registered with the beat, so the drop
+appears on `out_valid` one cycle later, along with the beat it applies to.
 
 ### Mid packet kill
 
@@ -242,11 +274,20 @@ arbiter is serving. Here it may never have selected feed 0 at all.
 
 ### Flow control
 
-`in_ready[f] = out_ready[f]`, per feed, combinational.
+```
+in_ready[f] = ~valid_q[f] | out_ready[f] | drop[f];
+```
 
-A dropped beat never reaches `feed_buffer`, so it never uses a FIFO slot. The
-drop makes no difference to how much room is downstream, so `in_ready` does not
-look at it.
+Per feed, combinational, three terms.
+
+A feed holding nothing accepts, because there is nothing to release first. A
+feed holding a beat releases it when downstream has room, or when the beat is
+being dropped and therefore needs no room at all.
+
+The drop term matters when downstream is full. A dropped beat never reaches
+`feed_buffer` and never uses a FIFO slot, so holding it behind a full FIFO
+would stall a feed for a beat that was going to be discarded. This puts the
+drop on the ready path deliberately.
 
 ## 5. Design decisions
 
@@ -293,13 +334,45 @@ through. That is accepted, see section 7.
 ### No skid buffer
 
 A skid buffer is needed when a beat can arrive that cannot be taken. That
-happens when `out_ready` is registered, because upstream then acts on stale
+happens when the ready path is registered, because upstream then acts on stale
 information and commits a beat that has nowhere to go.
 
-Here `out_ready` is combinational and `in_ready` follows it in the same cycle.
-Upstream never commits a beat DEDUP_INGRESS cannot take, so there is nothing to absorb.
+The pipeline register added for timing sits on the datapath only. The ready
+path stays combinational: `in_ready` is computed from `valid_q`, `out_ready`
+and `drop` with no register in the way, so upstream sees the decision in the
+cycle it needs it. Upstream never commits a beat DEDUP_INGRESS cannot take, so
+there is nothing to absorb.
 
 If a register is ever added to the ready path, this has to be revisited.
+
+### The sequence register is not part of the handshake
+
+`seq_regs[f]` is written on `in_valid[f] && in_sop[f]`. There is no `in_ready`
+term, so a SOP beat is captured whether or not it is accepted that cycle.
+
+This is a timing decision. `in_ready` is driven by `drop`, which sits at the far
+end of the comparator tree. Putting `in_ready` in this enable would put the
+whole tree on a path ending at this register's clock enable, and that was the
+path that failed STA at WNS -0.442 ns.
+
+Writing before acceptance is safe. While `in_ready` is low the sender holds
+`in_valid` and `in_data` unchanged, so the SOP beat stays on the bus. The write
+fires every cycle of the stall and stores the same number every time.
+
+Example. A SOP carrying sequence 100 arrives on feed 0 while `in_ready` is low.
+`seq_regs[0]` is written with 100 straight away, before the beat is accepted.
+The stall lasts three cycles, and the same 100 is written on each of them. On
+the fourth cycle `in_ready` goes high and the beat is accepted. `seq_regs[0]`
+already holds 100, which is the right value, so the beats that follow compare
+against the right number.
+
+The stall always ends. Nothing inside this block can hold a feed forever, and
+the sender is not allowed to withdraw the beat, so the SOP that was written
+early is always the SOP that eventually gets accepted.
+
+`seq_regs` is not part of the acceptance protocol. Acceptance is still
+`in_valid && in_ready` on the datapath. This register only observes the SOP beat
+while it is present.
 
 ### CPT_DEPTH of 8, parameterised
 
@@ -318,11 +391,12 @@ period.
 
 ### Measuring a block with no registers in the datapath
 
-DEDUP_INGRESS's datapath runs from input port to output port with nothing in between. A
-standalone synthesis therefore contains no register to register path through
-the comparator tree, and STA has nothing to time. Running it that way reports
-only the CPT bookkeeping, which is a handful of logic and always passes. The
-number is real but it does not describe the block.
+The block now has a register on the datapath, so some paths through it are real
+register to register paths and STA can time them. The ports are still
+unconstrained, though. A path from `in_data` to the pipeline register starts at
+an input port with no arrival time, and a path from the register to `out_data`
+ends at an output port with no required time. Neither is timed, and the path
+from `cmpl_seq` into the comparators is one of them.
 
 The alternative is to constrain the ports with `set_input_delay` and
 `set_output_delay`. That works, but it measures the block against a budget
@@ -336,21 +410,26 @@ not to the design, and the harness is not part of the pipeline.
 
 ### Result
 
-WNS +0.179 ns post synthesis.
+WNS +0.240 ns post synthesis, with zero warnings.
 
-Worst path:
+Before the pipeline register the same design measured WNS -0.442 ns. The
+failing path ran from `cmpl_seq` through a 32 bit equality, the OR reduction,
+`drop` and `in_ready`, and ended on the clock enable of `seq_regs`:
 
 ```
-Source:       in_data_q_reg[0][4]/C
-Destination:  out_valid_reg[0]/D
-Data Path Delay: 2.759 ns  (logic 0.977 ns, route 1.782 ns)
-Logic Levels: 7  (CARRY4=3, LUT3=1, LUT4=1, LUT5=1, LUT6=1)
+Source:       cmpl_seq_q_reg[3]/C
+Destination:  u_dedup_ingress/seq_regs_reg[0][0]/CE
+Data Path Delay: 3.105 ns  (logic 0.975 ns, route 2.130 ns)
+Logic Levels: 7  (CARRY4=3, LUT2=1, LUT4=1, LUT6=2)
 ```
 
-The path runs from an input data bit, through sequence extraction, through the
-comparator tree, through the drop decision, to `out_valid`. This is the path
-predicted to be critical, and it is. The three CARRY4s are the equality
-comparators, which Vivado maps onto the carry chain rather than LUTs.
+Two thirds of that delay is routing. The three CARRY4s are the equality
+comparison, which Vivado maps onto the carry chain rather than LUTs.
+
+The cut removed that path in two ways. The comparator results are now
+registered, so the OR reduction and the drop no longer share a cycle with the
+comparison. And `seq_regs` no longer takes `in_ready` in its enable, so the tree
+no longer ends on that clock enable at all.
 
 ### What the completion comparison cost
 
@@ -366,17 +445,19 @@ existing path more expensive to reach.
 
 ### If depth grows
 
-The margin is 0.179 ns on a 3.077 ns period. Raising `CPT_DEPTH` widens the
+The margin is 0.240 ns on a 3.077 ns period. Raising `CPT_DEPTH` widens the
 tree and eats into it, both through the extra comparators and through the
 higher fanout on `cpt_seq`.
 
-If it stops closing, the cut goes between the comparators and the OR reduction,
-which costs one cycle of latency through the block. It does not go into the
-ready path: `in_ready` must stay independent of the tree.
+The cut between the comparators and the OR reduction has already been taken,
+and it cost one cycle of latency. The next one, if it is ever needed, splits the
+equality itself: compare the low half of `SEQ_W` in one cycle and the high half
+in the next, then AND the results. That halves the carry chain and costs another
+cycle.
 
 ## 7. Verification
 
-23 tests under `verification/`, run with cocotb against Verilator:
+24 tests under `verification/`, run with cocotb against Verilator:
 
 ```
 cd verification && make
@@ -386,12 +467,14 @@ The RTL was mutated to check the tests catch what they claim to.
 
 ### Golden model
 
-`dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT, the write
-pointer, and the per feed sequence registers. Every cycle it is given the same
-stimulus as the DUT and predicts `out_valid`, `in_ready` and `out_seq`. The
-driver compares them on every cycle of every test, directed and random alike,
-so a directed test only has to set up its scenario and assert the one thing it
-is about.
+`dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT,
+the write pointer, the per feed sequence registers, and the pipeline register
+with its match results. Every cycle it is given the same stimulus as the DUT
+and predicts `in_ready`, `out_valid`, `out_data`, `out_sop`, `out_eop` and
+`out_seq`. Because it holds the pipeline register, its outputs run one cycle
+behind the stimulus, exactly as the RTL does. The driver compares them on every
+cycle of every test, directed and random alike, so a directed test only has to
+set up its scenario and assert the one thing it is about.
 
 ### Directed coverage
 
@@ -430,9 +513,11 @@ to be deliberate.
 off from that cycle on. Its next packet is unaffected, and a second feed
 carrying a different packet is untouched.
 
-**Flow control.** `in_ready` follows `out_ready` per feed. It does not move when
-a copy is dropped. Stalling one feed leaves the others streaming. A SOP
-presented while ready is low does not update that feed's `seq_regs`.
+**Flow control.** A feed follows `out_ready` once it is holding a beat. A
+dropped copy is accepted even when downstream is closed. A passing copy is not.
+Stalling one feed leaves the others streaming. A SOP held on the bus during a
+stall still lands in `seq_regs`, checked on every feed, and all four feeds hold
+their own number at the same time.
 
 ### Constrained random
 
@@ -454,5 +539,5 @@ The table only remembers the last 8 completed packets. If a copy arrives very
 late, after 8 more packets have completed, its sequence number is gone from the
 table and the copy passes through.
 
-This is expected. It comes from the fixed table size. Test 9 checks it, so if
-the table ever changes, someone has to change that test on purpose.
+This is expected. It comes from the fixed table size. The straggler test checks
+it, so if the table ever changes, someone has to change that test on purpose.
