@@ -291,16 +291,14 @@ class DedupEgressTB:
 
 
 async def send_packet(tb, seq, beats, out_ready=None):
-    """Stream a whole packet, returning one sample per beat.
+    """Stream a whole packet back to back, returning one sample per beat.
 
     A beat is re-presented until in_ready is high, so the packet survives
-    backpressure. Once a beat is accepted, one more cycle is run to let it
-    reach the outputs, and that cycle's sample is the one returned for it.
-
-    That extra cycle puts a gap between beats, so this does not drive back to
-    back traffic. Tests that need back to back beats drive them by hand.
+    backpressure. The sample for a beat is read on the following cycle, while
+    the next beat is already being driven, so no idle cycle is inserted.
     """
     samples = []
+    pending = False
 
     for i in range(beats):
         while True:
@@ -313,11 +311,16 @@ async def send_packet(tb, seq, beats, out_ready=None):
                 eop=1 if i == beats - 1 else 0,
             )
             got = await tb.step()
+            if pending:
+                samples.append(got)
+                pending = False
             if got["in_ready"]:
+                pending = True
                 break
 
-        if out_ready is not None:
-            tb.out_ready = out_ready
-        samples.append(await tb.step())
+    # one more cycle so the last beat reaches the outputs
+    if out_ready is not None:
+        tb.out_ready = out_ready
+    samples.append(await tb.step())
 
     return samples
