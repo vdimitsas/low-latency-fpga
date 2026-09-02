@@ -463,8 +463,6 @@ cycle.
 cd verification && make
 ```
 
-The RTL was mutated to check the tests catch what they claim to.
-
 ### Golden model
 
 `dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT,
