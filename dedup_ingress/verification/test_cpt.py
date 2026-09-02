@@ -12,26 +12,19 @@
    before its twin completed is still served and still checksummed. Writing it
    a second time would evict a different, still useful entry for no gain.
 
-dedup_ingress has one cycle of latency, so a beat presented in one cycle is
-observed on the outputs in the next. Every probe here presents the beat, steps
-to accept it, then steps again to look at it. Checking in the same cycle would
-be worthless for the drop cases: out_valid is low in that cycle whether the
-beat was dropped or not, because the pipeline register has not loaded yet.
+step reads the DUT after the clock edge, so the beat presented in a call is
+already on the outputs when that call returns. One step per probe.
 """
 
 import cocotb
 
-from dedup_ingress_common import CPT_DEPTH, LATENCY, DedupIngressTB
+from dedup_ingress_common import CPT_DEPTH, DedupIngressTB
 
 
 async def probe(tb, feed, seq):
     """Present one SOP beat carrying seq and return the cycle it appears in."""
     tb.present(feed, seq=seq, sop=1)
-    await tb.step()
-    got = None
-    for _ in range(LATENCY):
-        got = await tb.step()
-    return got
+    return await tb.step()
 
 
 @cocotb.test()
@@ -52,8 +45,6 @@ async def test_completion_is_written_without_a_match(dut):
         "a completion with no concurrent traffic was not written to the CPT"
     )
 
-    await tb.idle(2)
-
 
 @cocotb.test()
 async def test_write_pointer_advances(dut):
@@ -65,7 +56,6 @@ async def test_write_pointer_advances(dut):
     for seq in seqs:
         tb.complete(seq)
         await tb.step()
-    await tb.idle(2)
 
     # Every one of them must still be held: the table is exactly full.
     for seq in seqs:
@@ -73,8 +63,6 @@ async def test_write_pointer_advances(dut):
         assert got["out_valid"][0] == 0, (
             f"seq {seq:#x} was lost, the write pointer is not advancing cleanly"
         )
-
-    await tb.idle(2)
 
 
 @cocotb.test()
@@ -93,12 +81,9 @@ async def test_table_wraps_and_evicts_oldest(dut):
     evictor = 0x9FF
     tb.complete(evictor)
     await tb.step()
-    await tb.idle(2)
 
     got = await probe(tb, 0, first)
-    assert got["out_valid"][0] == 1, (
-        "the oldest entry was not evicted on wrap"
-    )
+    assert got["out_valid"][0] == 1, "the oldest entry was not evicted on wrap"
 
     # Everything newer is still held.
     for seq in seqs[1:] + [evictor]:
@@ -106,8 +91,6 @@ async def test_table_wraps_and_evicts_oldest(dut):
         assert got["out_valid"][1] == 0, (
             f"seq {seq:#x} should still be in the table after one eviction"
         )
-
-    await tb.idle(2)
 
 
 @cocotb.test()
@@ -131,15 +114,12 @@ async def test_straggler_outside_the_window(dut):
     for i in range(CPT_DEPTH):
         tb.complete(0xE000 + i)
         await tb.step()
-    await tb.idle(2)
 
     # Its late copy now has nothing to match against.
     got = await probe(tb, 3, straggler)
     assert got["out_valid"][3] == 1, (
         "expected the evicted straggler to pass through the bounded window"
     )
-
-    await tb.idle(2)
 
 
 @cocotb.test()
@@ -158,14 +138,12 @@ async def test_repeated_completion_is_not_rewritten(dut):
     for seq in seqs:
         tb.complete(seq)
         await tb.step()
-    await tb.idle(2)
 
     # Complete the newest entry again, several times over.
     repeat = seqs[-1]
     for _ in range(3):
         tb.complete(repeat)
         await tb.step()
-    await tb.idle(2)
 
     # Nothing was evicted: every original entry is still held.
     for seq in seqs:
@@ -173,8 +151,6 @@ async def test_repeated_completion_is_not_rewritten(dut):
         assert got["out_valid"][0] == 0, (
             f"seq {seq:#x} was evicted by a repeated completion"
         )
-
-    await tb.idle(2)
 
 
 @cocotb.test()
@@ -203,7 +179,6 @@ async def test_repeated_completion_leaves_the_pointer_alone(dut):
     fresh = 0xCFF
     tb.complete(fresh)
     await tb.step()
-    await tb.idle(2)
 
     got = await probe(tb, 0, seqs[0])
     assert got["out_valid"][0] == 1, (
@@ -217,5 +192,3 @@ async def test_repeated_completion_leaves_the_pointer_alone(dut):
         assert got["out_valid"][1] == 0, (
             f"seq {seq:#x} was lost, the pointer moved on a suppressed write"
         )
-
-    await tb.idle(2)

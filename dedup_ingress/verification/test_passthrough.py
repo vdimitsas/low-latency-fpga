@@ -5,15 +5,14 @@
    is dropped, which is what separates a working comparator from one that
    matches everything.
 
-dedup_ingress has one cycle of latency, so a beat presented in one cycle
-appears on the outputs in the next. send_packet returns beat aligned samples,
-so indexing into its result still means "the output for beat i". Tests that
-drive beats by hand have to sample one cycle later themselves.
+step reads the DUT after the clock edge, so the beat driven in a call is
+already on the outputs when that call returns. send_packet returns beat aligned
+samples, so indexing into its result means "the output for beat i".
 """
 
 import cocotb
 
-from dedup_ingress_common import LATENCY, DedupIngressTB, N_FEEDS, send_packet
+from dedup_ingress_common import DedupIngressTB, N_FEEDS, send_packet
 
 
 @cocotb.test()
@@ -23,16 +22,17 @@ async def test_empty_cpt_passes_everything(dut):
     await tb.start()
 
     for feed in range(N_FEEDS):
-        samples = await send_packet(tb, feed, seq=0x1000 + feed, beats=4)
+        seq = 0x1000 + feed
+        samples = await send_packet(tb, feed, seq=seq, beats=4)
+
         for i, s in enumerate(samples):
             assert s["out_valid"][feed] == 1, (
                 f"feed {feed} beat {i} was dropped with an empty CPT"
             )
-        assert samples[0]["out_seq"][feed] == 0x1000 + feed
+
+        assert samples[0]["out_seq"][feed] == seq
         assert samples[0]["out_sop"][feed] == 1
         assert samples[-1]["out_eop"][feed] == 1
-
-    await tb.idle(4)
 
 
 @cocotb.test()
@@ -52,8 +52,6 @@ async def test_completions_that_never_match(dut):
             assert s["out_valid"][feed] == 1, (
                 f"feed {feed} beat {i} dropped on a non-matching seq"
             )
-
-    await tb.idle(4)
 
 
 @cocotb.test()
@@ -76,15 +74,8 @@ async def test_all_feeds_in_parallel(dut):
             )
         samples.append(await tb.step())
 
-    # drain the last beat out of the pipeline register
-    for _ in range(LATENCY):
-        samples.append(await tb.step())
-
-    # beat b is presented in cycle b and observed in cycle b + LATENCY
     for beat in range(beats):
-        got = samples[beat + LATENCY]
+        got = samples[beat]
         assert got["out_valid"] == [1] * N_FEEDS, (
             f"beat {beat}: expected all feeds to pass, got {got['out_valid']}"
         )
-
-    await tb.idle(4)

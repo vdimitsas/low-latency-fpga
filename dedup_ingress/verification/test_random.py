@@ -1,8 +1,8 @@
 """Test 12: constrained random against the golden model.
 
-Every cycle the model in dedup_ingress_common predicts out_valid, in_ready and out_seq
-from the same stimulus the DUT sees, and DedupIngressTB.step checks them. This test
-therefore only has to generate traffic worth checking.
+Every cycle the model in dedup_ingress_common predicts out_valid, in_ready and
+the output beat from the same stimulus the DUT sees, and DedupIngressTB.step
+checks them. This test therefore only has to generate traffic worth checking.
 
 The constraints matter more than the volume. Sequence numbers are drawn from a
 small pool so that duplicates and completions collide often, and completions

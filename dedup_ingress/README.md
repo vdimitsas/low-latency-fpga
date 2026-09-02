@@ -47,13 +47,13 @@ cd sta && vivado -mode batch -source run.tcl
 ## Verification
 
 ```bash
-cd verification && make   # 24 tests
+cd verification && make   # 25 tests
 ```
 
 Directed tests cover passthrough, the drop, the same cycle bypass, the completed
 packets table, the mid packet kill and flow control. Constrained random then
 drives two regimes against a cycle accurate golden model that checks
-`out_valid`, `in_ready` and `out_seq` on every cycle. What each test
+`in_ready`, `out_valid` and the output beat on every cycle. What each test
 establishes is in
 [`docs/dedup_ingress_design.md`](docs/dedup_ingress_design.md), section 7.
 

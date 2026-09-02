@@ -457,7 +457,7 @@ cycle.
 
 ## 7. Verification
 
-24 tests under `verification/`, run with cocotb against Verilator:
+25 tests under `verification/`, run with cocotb against Verilator:
 
 ```
 cd verification && make
@@ -469,12 +469,37 @@ The RTL was mutated to check the tests catch what they claim to.
 
 `dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT,
 the write pointer, the per feed sequence registers, and the pipeline register
-with its match results. Every cycle it is given the same stimulus as the DUT
-and predicts `in_ready`, `out_valid`, `out_data`, `out_sop`, `out_eop` and
-`out_seq`. Because it holds the pipeline register, its outputs run one cycle
-behind the stimulus, exactly as the RTL does. The driver compares them on every
-cycle of every test, directed and random alike, so a directed test only has to
-set up its scenario and assert the one thing it is about.
+with its match results.
+
+It has two methods. `drive` puts this cycle's inputs on the model, the way
+wires hold them. `evaluate` computes `in_ready`, the sequence context and the
+comparator results from the flops and the table as they stand, then loads the
+flops and writes the table, then reports the outputs. The order matters: those
+three are combinational, so they have to be computed before anything is
+written.
+
+`DedupIngressTB.step` runs one cycle. It drives the staged stimulus to the DUT
+and to the model at the same point, waits for the clock edge, reads the DUT at
+the `ReadOnly` phase, and asserts the two agree on `in_ready`, `out_valid` and,
+when a beat is being presented, on `out_data`, `out_sop`, `out_eop` and
+`out_seq`.
+
+Reading after the edge is what makes the tests direct. The outputs `step`
+returns belong to the beat driven in that same call, so a test presents a beat
+and looks at the result of that one `step`. Reading before the edge would
+return the previous beat, and a test would need a second `step` to see the one
+it cares about. That second cycle drives nothing, so any check for a beat being
+dropped would pass on an empty cycle whether the block worked or not.
+
+`in_ready` is the exception. It is combinational from `valid_q`, `out_ready`
+and `drop`, and it applies to whatever beat is being offered at that moment.
+The stream never stops, so the value read after the edge is the one for the
+beat about to be driven, not the one for the beat that has already been
+accepted. `send_packet` holds it and uses it on the next pass.
+
+The check runs on every cycle of every test, directed and random alike, so a
+directed test only has to set up its scenario and assert the one thing it is
+about.
 
 ### Directed coverage
 
@@ -513,11 +538,12 @@ to be deliberate.
 off from that cycle on. Its next packet is unaffected, and a second feed
 carrying a different packet is untouched.
 
-**Flow control.** A feed follows `out_ready` once it is holding a beat. A
-dropped copy is accepted even when downstream is closed. A passing copy is not.
-Stalling one feed leaves the others streaming. A SOP held on the bus during a
-stall still lands in `seq_regs`, checked on every feed, and all four feeds hold
-their own number at the same time.
+**Flow control.** A stage holding nothing accepts even with downstream closed.
+A feed follows `out_ready` once it is holding a beat. A dropped copy is
+accepted even when downstream is closed. A passing copy is not. Stalling one
+feed leaves the others streaming. A SOP held on the bus during a stall still
+lands in `seq_regs`, checked on every feed, and all four feeds hold their own
+number at the same time.
 
 ### Constrained random
 
