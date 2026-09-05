@@ -1,5 +1,5 @@
-cat > .gitignore << 'EOF'
 sim_build/
+sim_build_*/
 results.xml
 *.vcd
 *.fst
@@ -20,4 +20,4 @@ vivado*.str
 xsim.dir/
 *.swp
 .DS_Store
-EOF
+reports/
