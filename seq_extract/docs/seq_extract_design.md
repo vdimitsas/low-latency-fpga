@@ -13,7 +13,7 @@ reasoning behind them, the timing closure method and results, and the
 verification approach used to validate it.
 
 Every packet carries a sequence ID at a fixed byte offset from its start. Every
-stage behind this one needs that number: `dedup_ingress` compares it against the
+stage after it needs that number: `dedup_ingress` compares it against the
 completed packets table, `dedup_egress` makes the final drop decision with it,
 and the stages in between carry it along. Extracting it once, at the front,
 means no block downstream has to parse a header.

@@ -7,7 +7,7 @@ and hands it to the rest of the pipeline as sideband. It is the front end of the
 ## Context
 
 Every packet carries a sequence ID at a fixed byte offset from its start. Every
-stage behind this one needs it: `dedup_ingress` compares it against the
+stage after it needs it: `dedup_ingress` compares it against the
 completed packets table, `dedup_egress` makes the final drop decision with it,
 and the stages in between carry it along. Extracting it once, at the front,
 means no block downstream has to parse a header.
