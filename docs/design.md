@@ -44,7 +44,15 @@ The parser is organised as a chain of independent stages, each with a single res
 
 Stages
 
-DEDUP_INGRESS sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. It is also where the sequence number is extracted: the field arrives only in the first beat of a packet, so DEDUP_INGRESS slices it out, holds it for the rest of the packet, and presents it alongside every beat it forwards.
+SEQ_EXTRACT sits at the head of the pipeline. Every stage after it needs the packet's sequence ID: DEDUP_INGRESS compares it against its table of completed packets, DEDUP_EGRESS makes the final drop decision with it, and the stages in between carry it along. Extracting it once, here, means no block downstream has to parse a header.
+
+The MAC strips the Ethernet header and nothing else, so a beat stream starts at the IP header: 20 bytes of IP, then 8 of UDP, then the exchange's own header at byte 28. The sequence ID sits somewhere inside that, at a byte offset the venue decides. At 64 bits per beat it lands in beat 3 or later, and depending on the offset it may sit inside one beat or cross into the next. Both cases are handled, chosen at elaboration time.
+
+SEQ_EXTRACT does not compare, drop, buffer or reorder. It passes every beat through unchanged and adds two outputs: the extracted sequence ID and a one cycle valid marking the beat that completed it. A packet that ends before the sequence ID is complete produces no valid at all.
+
+One cycle of latency through this stage.
+
+DEDUP_INGRESS sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. The sequence ID arrives on a sideband from SEQ_EXTRACT, on one beat with a one cycle valid. DEDUP_INGRESS latches it there and holds it for the rest of the packet.
 
 One cycle of latency through this stage. The sequence comparison and the drop decision did not fit in a single cycle at 325 MHz, so they are split by a register.
 
@@ -66,7 +74,7 @@ CHECKSUM validates the served packet. Its result is the definition of success fo
 
 CHECKSUM restarts its accumulator on any SOP, not only on the SOP that follows an EOP. This matters because the arbiter can forward a fragment. A packet killed mid-flight by DEDUP_INGRESS leaves beats in FEED_BUFFER with no EOP behind them, and the arbiter serves those beats and then continues into the next packet on that feed. Restarting on SOP means the fragment is abandoned the moment the next real packet begins, so the packet behind it is checksummed on its own. The fragment never reaches an EOP, so it never produces a completion.
 
-DEDUP_EGRESS is the last stage before the output. It holds the same kind of table as DEDUP_INGRESS and drops any beat whose sequence number has already completed. What reaches it is traffic that got past DEDUP_INGRESS because the completion arrived too late to stop it. A copy of a packet is streaming through, and the completion for an identical packet, same sequence number on another feed, lands afterwards. If it lands while the copy is still crossing DEDUP_INGRESS, the rest of that copy is cut and a fragment goes on. If it lands after the copy has fully passed, the whole copy goes on. Either way it ends up here. Neither block remembers a decision from one beat to the next. Each beat is judged on its own sequence number, so a fragment's beats match the table and die, and the next packet's beats carry a different sequence number and pass. DEDUP_INGRESS latches that sequence number at SOP and holds it for the packet, while DEDUP_EGRESS receives it on every beat.
+DEDUP_EGRESS is the last stage before the output. It holds the same kind of table as DEDUP_INGRESS and drops any beat whose sequence number has already completed. What reaches it is traffic that got past DEDUP_INGRESS because the completion arrived too late to stop it. A copy of a packet is streaming through, and the completion for an identical packet, same sequence number on another feed, lands afterwards. If it lands while the copy is still crossing DEDUP_INGRESS, the rest of that copy is cut and a fragment goes on. If it lands after the copy has fully passed, the whole copy goes on. Either way it ends up here. Neither block remembers a decision from one beat to the next. Each beat is judged on its own sequence number, so a fragment's beats match the table and die, and the next packet's beats carry a different sequence number and pass. DEDUP_INGRESS latches that sequence number on its valid and holds it for the packet, while DEDUP_EGRESS receives it on every beat.
 
 Satellite logic
 
@@ -108,7 +116,7 @@ How this design relates
 
 Several structural choices here match that work, having been arrived at independently.
 
-The sequence number field is parameterised by width and byte offset. [1] identifies the same three facts as the minimum needed to retarget an arbitrator between protocols: maximum packet size, sequence number width, and byte position of the sequence number. Their own targets vary widely on the last two, which is why this design carries them as parameters with a compile-time guard rather than fixing them.
+The sequence number field is parameterised by width and byte offset on SEQ_EXTRACT. [1] identifies the same three facts as the minimum needed to retarget an arbitrator between protocols: maximum packet size, sequence number width, and byte position of the sequence number. Their own targets vary widely on the last two, which is why this design carries them as parameters with a compile-time guard rather than fixing them.
 
 Sequence number comparison is the critical path. [1] reports the same, and measures a wider sequence number costing measurably more time. This design sees it in the same place: the worst path in DEDUP_INGRESS runs from the input data through the comparator tree to the output valid, which is why the table depth is a parameter to be swept against static timing analysis rather than chosen up front.
 
@@ -144,9 +152,9 @@ All stages talk to each other the same way, so any stage can be connected to the
 
 Handshake. Each connection uses a valid/ready pair. The sender raises valid when it has data. The receiver raises ready when it can accept. A beat moves on a clock edge only when both are high. A receiver that cannot accept lowers ready, and the sender holds its data steady until the beat is taken. This is what lets backpressure travel upstream without anything being lost.
 
-Beat format. A packet is carried as one or more beats. Each beat carries the payload and two boundary markers: start of packet and end of packet. A single beat packet has both markers set.
+Beat format. A packet is carried as one or more beats. Each beat carries the payload, two boundary markers, and a byte count. The markers are start of packet and end of packet; a single beat packet has both set. The byte count is the index of the last valid byte in the beat, so a full beat carries `BYTES_PER_BEAT - 1` and a partial last beat carries less. It comes from the MAC and is passed along unchanged.
 
-Sequence number. The sequence number is not repeated on every beat. It arrives once, inside the payload of the first beat, at a byte offset and width fixed by the exchange protocol. DEDUP_INGRESS slices it out there, holds it for the remaining beats of that packet, and re-emits it on a separate signal alongside every beat it forwards. Stages after DEDUP_INGRESS therefore see the sequence number on every beat without parsing the header again. It identifies which packet a beat belongs to, and is what DEDUP_INGRESS and FIX_TRACKER use to match copies of the same packet across different feeds.
+Sequence number. The sequence ID sits inside the payload at a byte offset and width fixed by the exchange protocol. SEQ_EXTRACT slices it out and puts it on a separate signal with a one cycle valid, marking the beat that completed it. A stage that needs it samples it on that valid and holds it for the rest of the packet. It identifies which packet a beat belongs to, and is what DEDUP_INGRESS and FIX_TRACKER use to match copies of the same packet across different feeds.
 
 Per feed signalling. Stages that handle several feeds at once carry the handshake per feed rather than for the group. A feed that is blocked does not stop the others, and readiness is reported back to each feed independently.
 
