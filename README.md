@@ -12,7 +12,8 @@ is wired together.
 
 | Component | Status | WNS at 325 MHz |
 |---|---|---|
-| `dedup_ingress` | Implemented, verified, timing closed | +0.240 ns |
+| `seq_extract` | Implemented, verified, timing closed | +1.258 ns |
+| `dedup_ingress` | Implemented, verified, timing closed | +0.122 ns |
 | `feed_buffer` | Implemented, verified, timing closed | +0.688 ns |
 | `market_line_arbiter` | Implemented, verified, timing closed | +0.298 ns |
 | `dedup_egress` | Implemented, verified, timing closed | +0.257 ns |
@@ -31,6 +32,7 @@ exist and the pipeline is integrated.
 ```
 udp_parser/
 ├── docs/                 # system level design document and pipeline diagram
+├── seq_extract/          # sequence ID extraction at the head of the pipeline
 ├── dedup_ingress/        # duplicate removal at the head of the pipeline
 ├── feed_buffer/          # per feed FIFO storage
 ├── market_line_arbiter/  # redundant feed arbitration
@@ -44,6 +46,11 @@ Every component folder has the same shape, so it is only described once here:
 and timing script, and `docs/` the design document with its diagrams. Each also
 has its own `README.md` covering what the block does, its results, and how to
 run its tests.
+
+The exception is `seq_extract`, which holds a per feed lane module verified in
+its own right, so it carries a nested `lane/` folder with its own `rtl/`,
+`verification/` and `sta/`. The shape is the same one level down. Its `docs/`
+covers both modules.
 
 Start with [`docs/design.md`](docs/design.md) for the pipeline as a whole: what
 each stage is for, how they connect, and how the design relates to published

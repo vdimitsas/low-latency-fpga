@@ -4,14 +4,22 @@ The DUT is dedup_ingress_tb_wrap, which flattens dedup_ingress's packed two
 dimensional ports into single vectors. Feed f lives in bits [f*W : (f+1)*W) of
 a flat vector.
 
-dedup_ingress has one pipeline stage. The comparator tree runs in the cycle a
-beat is presented, and the beat plus its match results register together. The
-outputs are combinational functions of that register.
+dedup_ingress has one register, at its output. The comparators, the drop
+decision and the ready path all run in the cycle a beat is presented, and the
+beat is registered on the way out. So a beat presented in a cycle appears on
+the outputs after that cycle's clock edge, and in_ready is combinational from
+the same cycle's inputs.
 
 step drives the inputs to the DUT and the model at the same point, then waits
 for the clock edge and reads at the ReadOnly phase, once the simulator has
 settled. So the outputs it returns belong to the beat driven that cycle, and
 in_ready belongs to the cycle that has just started.
+
+The sequence number does not travel in in_data. It arrives on in_seq, marked by
+in_seq_valid on one beat of the packet, the way seq_extract delivers it. That
+beat is never beat 0: the beats before it carry no sequence number at all and
+cannot be dropped. out_seq_valid says which beats carry a real out_seq, so the
+stale window ahead of it is explicit on the interface.
 """
 
 import os
@@ -24,27 +32,12 @@ from cocotb.triggers import NextTimeStep, ReadOnly, RisingEdge
 N_FEEDS = int(os.environ.get("N_FEEDS", 4))
 DATA_W = int(os.environ.get("DATA_W", 64))
 SEQ_W = int(os.environ.get("SEQ_W", 32))
-SEQ_OFFSET = int(os.environ.get("SEQ_OFFSET", 0))
 CPT_DEPTH = int(os.environ.get("CPT_DEPTH", 8))
 
 CLK_PERIOD_NS = 10
 
 SEQ_MASK = (1 << SEQ_W) - 1
 DATA_MASK = (1 << DATA_W) - 1
-
-
-def seq_into_beat(seq, filler=0):
-    """Build a first beat carrying `seq` at the parameterised offset."""
-    beat = filler & DATA_MASK
-    field = ((1 << SEQ_W) - 1) << (SEQ_OFFSET * 8)
-    beat &= ~field & DATA_MASK
-    beat |= (seq & SEQ_MASK) << (SEQ_OFFSET * 8)
-    return beat & DATA_MASK
-
-
-def seq_from_beat(beat):
-    """Slice the seq field back out of a beat, mirroring the RTL."""
-    return (beat >> (SEQ_OFFSET * 8)) & SEQ_MASK
 
 
 def _pack(values, width):
@@ -56,11 +49,17 @@ def _pack(values, width):
 
 def _unpack(word, width, count):
     mask = (1 << width) - 1
-    return [(word >> (i * width)) & mask for i in range(count)]
+    values = []
+    for i in range(count):
+        values.append((word >> (i * width)) & mask)
+    return values
 
 
 def _bits(word, count):
-    return [(word >> i) & 1 for i in range(count)]
+    values = []
+    for i in range(count):
+        values.append((word >> i) & 1)
+    return values
 
 
 class GoldenDedupIngress:
@@ -72,10 +71,10 @@ class GoldenDedupIngress:
 
     State held across the edge:
 
-      cpt_seq, cpt_occupied, cpt_wr_ptr     the completed packets table
-      seq_regs                              per feed sequence context
-      valid_q, data_q, sop_q, eop_q, seq_q  the registered beat
-      cpt_match_q, bypass_match_q           the registered match results
+      cpt_seq, cpt_occupied, cpt_wr_ptr   the completed packets table
+      seq_regs                            per feed sequence number
+      seq_valid_regs                      whether it has arrived on this packet
+      out_*                               the output register
     """
 
     def __init__(self, n_feeds=N_FEEDS, cpt_depth=CPT_DEPTH):
@@ -89,6 +88,8 @@ class GoldenDedupIngress:
         self.in_data = [0] * self.n_feeds
         self.in_sop = [0] * self.n_feeds
         self.in_eop = [0] * self.n_feeds
+        self.in_seq = [0] * self.n_feeds
+        self.in_seq_valid = [0] * self.n_feeds
         self.out_ready = [0] * self.n_feeds
         self.cmpl_valid = 0
         self.cmpl_seq = 0
@@ -97,130 +98,144 @@ class GoldenDedupIngress:
         self.cpt_occupied = [0] * self.cpt_depth
         self.cpt_wr_ptr = 0
         self.seq_regs = [0] * self.n_feeds
+        self.seq_valid_regs = [0] * self.n_feeds
 
-        self.valid_q = [0] * self.n_feeds
-        self.data_q = [0] * self.n_feeds
-        self.sop_q = [0] * self.n_feeds
-        self.eop_q = [0] * self.n_feeds
-        self.seq_q = [0] * self.n_feeds
-        self.cpt_match_q = [0] * self.n_feeds
-        self.bypass_match_q = [0] * self.n_feeds
+        # the output register
+        self.out_valid_q = [0] * self.n_feeds
+        self.out_data_q = [0] * self.n_feeds
+        self.out_sop_q = [0] * self.n_feeds
+        self.out_eop_q = [0] * self.n_feeds
+        self.out_seq_q = [0] * self.n_feeds
+        self.out_seq_valid_q = [0] * self.n_feeds
 
-    def drive(self, in_valid, in_data, in_sop, in_eop, out_ready,
-              cmpl_valid, cmpl_seq):
+    def drive(self, in_valid, in_data, in_sop, in_eop, in_seq, in_seq_valid,
+              out_ready, cmpl_valid, cmpl_seq):
         """Put this cycle's inputs on the model, the way wires hold them."""
         self.in_valid = list(in_valid)
-        self.in_data = [d & DATA_MASK for d in in_data]
+        self.in_data = []
+        for d in in_data:
+            self.in_data.append(d & DATA_MASK)
         self.in_sop = list(in_sop)
         self.in_eop = list(in_eop)
+        self.in_seq = []
+        for value in in_seq:
+            self.in_seq.append(value & SEQ_MASK)
+        self.in_seq_valid = list(in_seq_valid)
         self.out_ready = list(out_ready)
         self.cmpl_valid = cmpl_valid
         self.cmpl_seq = cmpl_seq & SEQ_MASK
 
-    # -- combinational, from this cycle's inputs -----------------------------
+    # -- combinational, from this cycle's inputs and the flops ---------------
 
     def _seq_sel(self):
-        """The seq compared this cycle, before the register."""
-        out = []
+        """The seq compared this cycle, and whether it means anything yet.
+
+        The arriving value on the beat in_seq_valid marks, the held value
+        afterwards. Before the sequence number has arrived there is nothing to
+        compare.
+
+        A SOP beat clears the valid here and now. seq_valid_regs only clears at
+        the clock edge, so without this the first beat of a packet would still
+        be compared against the number the previous packet left behind.
+        """
+        seq = []
+        valid = []
         for f in range(self.n_feeds):
-            if self.in_sop[f]:
-                out.append(seq_from_beat(self.in_data[f]))
+            if self.in_seq_valid[f]:
+                seq.append(self.in_seq[f])
+                valid.append(1)
+            elif self.in_sop[f]:
+                seq.append(self.seq_regs[f])
+                valid.append(0)
             else:
-                out.append(self.seq_regs[f])
-        return out
-
-    def _matches(self):
-        """Comparator results this cycle, against the table as it stands now."""
-        seq_sel = self._seq_sel()
-
-        cpt_match = []
-        bypass_match = []
-        for f in range(self.n_feeds):
-            cpt_match.append(
-                1
-                if any(
-                    self.cpt_occupied[e] and self.cpt_seq[e] == seq_sel[f]
-                    for e in range(self.cpt_depth)
-                )
-                else 0
-            )
-            bypass_match.append(
-                1
-                if (self.cmpl_valid and self.cmpl_seq == seq_sel[f])
-                else 0
-            )
-        return seq_sel, cpt_match, bypass_match
-
-    # -- combinational, from the registered state ---------------------------
+                seq.append(self.seq_regs[f])
+                valid.append(self.seq_valid_regs[f])
+        return seq, valid
 
     def _drop(self):
-        return [
-            1
-            if (self.valid_q[f] and (self.cpt_match_q[f] or self.bypass_match_q[f]))
-            else 0
-            for f in range(self.n_feeds)
-        ]
+        seq_sel, seq_sel_valid = self._seq_sel()
+
+        drop = []
+        for f in range(self.n_feeds):
+            cpt_match = 0
+            for e in range(self.cpt_depth):
+                if (seq_sel_valid[f] and self.cpt_occupied[e]
+                        and self.cpt_seq[e] == seq_sel[f]):
+                    cpt_match = 1
+
+            bypass_match = 0
+            if (seq_sel_valid[f] and self.cmpl_valid
+                    and self.cmpl_seq == seq_sel[f]):
+                bypass_match = 1
+
+            if self.in_valid[f] and (cpt_match or bypass_match):
+                drop.append(1)
+            else:
+                drop.append(0)
+        return drop
 
     def _in_ready(self):
         drop = self._drop()
-        return [
-            1 if ((not self.valid_q[f]) or self.out_ready[f] or drop[f]) else 0
-            for f in range(self.n_feeds)
-        ]
+        ready = []
+        for f in range(self.n_feeds):
+            if (not self.in_valid[f]) or self.out_ready[f] or drop[f]:
+                ready.append(1)
+            else:
+                ready.append(0)
+        return ready
 
     def evaluate(self):
         """Move across the clock edge, then report the outputs after it.
 
-        in_ready, the sequence context and the comparator results are
-        combinational, so they are computed from the flops and the table before
-        either is written. The flops then load, and the outputs are read from
-        them. So the returned outputs belong to the beat just driven, and
-        in_ready belongs to the cycle that starts after the edge.
+        in_ready, the sequence context and the drop decision are
+        combinational, so they are computed from the inputs and from the flops
+        before any of them are written. The flops then load, and the outputs
+        are read from them.
         """
-        in_ready = self._in_ready()
-        seq_sel, cpt_match, bypass_match = self._matches()
+        seq_sel, seq_sel_valid = self._seq_sel()
+        drop = self._drop()
 
-        # sequence context: written on any valid SOP beat, no in_ready term
+        # the output register: the enable is out_ready, so a closed feed holds
+        # what it has. drop is not on the payload enable, only on the valid.
+        for f in range(self.n_feeds):
+            if self.out_ready[f]:
+                if self.in_valid[f] and not drop[f]:
+                    self.out_valid_q[f] = 1
+                else:
+                    self.out_valid_q[f] = 0
+
+            if self.out_ready[f] and self.in_valid[f]:
+                self.out_data_q[f] = self.in_data[f]
+                self.out_sop_q[f] = self.in_sop[f]
+                self.out_eop_q[f] = self.in_eop[f]
+                self.out_seq_q[f] = seq_sel[f]
+                self.out_seq_valid_q[f] = seq_sel_valid[f]
+
+        # sequence context: cleared on SOP, written on the beat in_seq_valid
+        # marks. No in_ready term, so a beat held across a stall writes the
+        # same value on every cycle of it.
         for f in range(self.n_feeds):
             if self.in_valid[f] and self.in_sop[f]:
-                self.seq_regs[f] = seq_from_beat(self.in_data[f])
+                self.seq_valid_regs[f] = 0
 
-        # the cut: valid follows in_ready alone, payload follows the handshake
-        for f in range(self.n_feeds):
-            if in_ready[f]:
-                self.valid_q[f] = 1 if self.in_valid[f] else 0
+            if self.in_valid[f] and self.in_seq_valid[f]:
+                self.seq_regs[f] = self.in_seq[f]
+                self.seq_valid_regs[f] = 1
 
-            if self.in_valid[f] and in_ready[f]:
-                self.data_q[f] = self.in_data[f]
-                self.sop_q[f] = self.in_sop[f]
-                self.eop_q[f] = self.in_eop[f]
-                self.seq_q[f] = seq_sel[f]
-                self.cpt_match_q[f] = cpt_match[f]
-                self.bypass_match_q[f] = bypass_match[f]
-
-        # completed packets table, suppressed when the value is already held
+        # completed packets table: every completion writes, circular
         if self.cmpl_valid:
-            already_held = any(
-                self.cpt_occupied[e] and self.cpt_seq[e] == self.cmpl_seq
-                for e in range(self.cpt_depth)
-            )
-            if not already_held:
-                self.cpt_seq[self.cpt_wr_ptr] = self.cmpl_seq
-                self.cpt_occupied[self.cpt_wr_ptr] = 1
-                self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
-
-        drop = self._drop()
+            self.cpt_seq[self.cpt_wr_ptr] = self.cmpl_seq
+            self.cpt_occupied[self.cpt_wr_ptr] = 1
+            self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
 
         return {
             "in_ready": self._in_ready(),
-            "out_valid": [
-                1 if (self.valid_q[f] and not drop[f]) else 0
-                for f in range(self.n_feeds)
-            ],
-            "out_data": list(self.data_q),
-            "out_sop": list(self.sop_q),
-            "out_eop": list(self.eop_q),
-            "out_seq": list(self.seq_q),
+            "out_valid": list(self.out_valid_q),
+            "out_data": list(self.out_data_q),
+            "out_sop": list(self.out_sop_q),
+            "out_eop": list(self.out_eop_q),
+            "out_seq": list(self.out_seq_q),
+            "out_seq_valid": list(self.out_seq_valid_q),
         }
 
 
@@ -238,24 +253,39 @@ class DedupIngressTB:
         self.in_data = [0] * self.n_feeds
         self.in_sop = [0] * self.n_feeds
         self.in_eop = [0] * self.n_feeds
+        self.in_seq = [0] * self.n_feeds
+        self.in_seq_valid = [0] * self.n_feeds
         self.out_ready = [1] * self.n_feeds
         self.cmpl_valid = 0
         self.cmpl_seq = 0
 
     def present(self, feed, seq=None, data=None, sop=0, eop=0):
-        """Stage one feed's stimulus for the coming cycle."""
-        if seq is not None and data is None:
-            data = seq_into_beat(seq)
+        """Stage one feed's stimulus for the coming cycle.
+
+        Passing seq marks this beat as the one carrying the sequence number,
+        which is what in_seq_valid means. It is independent of sop: the two
+        land on the same beat only if a test asks for it.
+        """
         self.in_valid[feed] = 1
-        self.in_data[feed] = 0 if data is None else data
+        if data is None:
+            self.in_data[feed] = 0
+        else:
+            self.in_data[feed] = data & DATA_MASK
         self.in_sop[feed] = sop
         self.in_eop[feed] = eop
+
+        if seq is None:
+            self.in_seq_valid[feed] = 0
+        else:
+            self.in_seq[feed] = seq & SEQ_MASK
+            self.in_seq_valid[feed] = 1
 
     def idle_feeds(self):
         for f in range(self.n_feeds):
             self.in_valid[f] = 0
             self.in_sop[f] = 0
             self.in_eop[f] = 0
+            self.in_seq_valid[f] = 0
 
     def complete(self, seq):
         self.cmpl_valid = 1
@@ -267,6 +297,8 @@ class DedupIngressTB:
         d.in_sop.value = _pack(self.in_sop, 1)
         d.in_eop.value = _pack(self.in_eop, 1)
         d.in_data_flat.value = _pack(self.in_data, DATA_W)
+        d.in_seq_flat.value = _pack(self.in_seq, SEQ_W)
+        d.in_seq_valid.value = _pack(self.in_seq_valid, 1)
         d.out_ready.value = _pack(self.out_ready, 1)
         d.cmpl_valid.value = self.cmpl_valid
         d.cmpl_seq.value = self.cmpl_seq
@@ -280,6 +312,7 @@ class DedupIngressTB:
             "out_eop": _bits(int(d.out_eop.value), self.n_feeds),
             "out_data": _unpack(int(d.out_data_flat.value), DATA_W, self.n_feeds),
             "out_seq": _unpack(int(d.out_seq_flat.value), SEQ_W, self.n_feeds),
+            "out_seq_valid": _bits(int(d.out_seq_valid.value), self.n_feeds),
         }
 
     async def start(self):
@@ -311,6 +344,8 @@ class DedupIngressTB:
             in_data=self.in_data,
             in_sop=self.in_sop,
             in_eop=self.in_eop,
+            in_seq=self.in_seq,
+            in_seq_valid=self.in_seq_valid,
             out_ready=self.out_ready,
             cmpl_valid=self.cmpl_valid,
             cmpl_seq=self.cmpl_seq,
@@ -331,10 +366,17 @@ class DedupIngressTB:
         )
         for f in range(self.n_feeds):
             if expected["out_valid"][f]:
-                assert got["out_seq"][f] == expected["out_seq"][f], (
-                    f"out_seq mismatch on feed {f}: got {got['out_seq'][f]:#x} "
-                    f"expected {expected['out_seq'][f]:#x}"
+                assert got["out_seq_valid"][f] == expected["out_seq_valid"][f], (
+                    f"out_seq_valid mismatch on feed {f}: got "
+                    f"{got['out_seq_valid'][f]} "
+                    f"expected {expected['out_seq_valid'][f]}"
                 )
+                if expected["out_seq_valid"][f]:
+                    assert got["out_seq"][f] == expected["out_seq"][f], (
+                        f"out_seq mismatch on feed {f}: got "
+                        f"{got['out_seq'][f]:#x} "
+                        f"expected {expected['out_seq'][f]:#x}"
+                    )
                 assert got["out_data"][f] == expected["out_data"][f], (
                     f"out_data mismatch on feed {f}: got {got['out_data'][f]:#x} "
                     f"expected {expected['out_data'][f]:#x}"
@@ -362,21 +404,30 @@ class DedupIngressTB:
             await self.step()
 
 
-async def send_packet(tb, feed, seq, beats):
+async def send_packet(tb, feed, seq, beats, seq_beat):
     """Stream a whole packet on one feed, returning one sample per beat.
+
+    The sequence number is delivered on beat `seq_beat`, the way seq_extract
+    delivers it.
 
     in_ready is read after the edge, so it is the value for the coming cycle.
     It is held and used on the next pass to decide whether the beat that was
     just driven was taken. A refused beat is presented again.
     """
     samples = []
-    in_ready = 1          # the stage starts empty, so the first beat is taken
+    in_ready = 1          # the block starts ready, so the first beat is taken
     i = 0
 
     while i < beats:
+        if i == seq_beat:
+            beat_seq = seq
+        else:
+            beat_seq = None
+
         tb.present(
             feed,
-            data=seq_into_beat(seq) if i == 0 else (0xA0 + i),
+            seq=beat_seq,
+            data=0xA0 + i,
             sop=1 if i == 0 else 0,
             eop=1 if i == beats - 1 else 0,
         )

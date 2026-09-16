@@ -52,9 +52,9 @@ SEQ_EXTRACT does not compare, drop, buffer or reorder. It passes every beat thro
 
 One cycle of latency through this stage.
 
-DEDUP_INGRESS sits at the head of the pipeline. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. The sequence ID arrives on a sideband from SEQ_EXTRACT, on one beat with a one cycle valid. DEDUP_INGRESS latches it there and holds it for the rest of the packet.
+DEDUP_INGRESS sits directly behind SEQ_EXTRACT. Because the feeds are redundant copies of the same stream arriving at unpredictable times, the same packet will appear on other feeds after it has already been served. DEDUP_INGRESS drops those late duplicates so a packet that has already been forwarded successfully does not enter the pipeline a second time. The sequence ID arrives on a sideband from SEQ_EXTRACT, on one beat with a one cycle valid. DEDUP_INGRESS latches it there and holds it for the rest of the packet.
 
-One cycle of latency through this stage. The sequence comparison and the drop decision did not fit in a single cycle at 325 MHz, so they are split by a register.
+One cycle of latency through this stage. The comparison, the drop decision and the ready path all run in one cycle, and the beat is registered on the way out, so every output of the stage comes from a flop.
 
 FEED_BUFFER provides per-feed FIFO storage. The arbiter serves one feed at a time, so without buffering here the unselected feeds would immediately backpressure their sources. The FIFOs absorb incoming traffic while a feed waits its turn, and backpressure only propagates upstream when a FIFO genuinely fills.
 
@@ -86,7 +86,7 @@ TIMER starts counting when a checksum fails. It gives the pipeline a set number 
 
 Completion feedback runs from CHECKSUM back to DEDUP_INGRESS, and forward to DEDUP_EGRESS. It tells them a packet has been served successfully, so later copies of it can be dropped.
 
-DEDUP_INGRESS does not write a completion whose sequence number its table already holds. A packet can complete more than once, because a copy that got past the front of the pipeline before its twin completed is still served and still checksummed. Writing the same value twice would consume an entry and evict a different, still useful sequence number, shortening the window for nothing.
+DEDUP_INGRESS writes every completion, including one whose sequence number its table already holds. A second completion for the same packet can only happen if a second copy got all the way through, and that copy could only get through if the entry for the first had already been overwritten. By the time the repeat arrives there is nothing left to duplicate, so suppressing the write buys nothing and costs the widest comparison in the block.
 
 Number of feeds
 

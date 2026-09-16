@@ -7,8 +7,8 @@
 # dedup_ingress so the port paths become real register to register paths.
 # The flops belong to the measurement, not the design.
 #
-# The comparator tree is cut by a register: comparators in one cycle, OR
-# reduction and drop in the next.
+# There is no pipeline register in the block. The comparators, the OR
+# reduction and the drop decision all sit in one cycle.
 # =============================================================================
 
 set part      xc7k160tffg676-3

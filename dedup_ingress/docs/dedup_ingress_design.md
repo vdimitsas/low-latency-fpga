@@ -2,9 +2,9 @@
 
 ## 1. Purpose and scope
 
-This document describes the microarchitecture of `dedup_ingress`, the component within
-the UDP market-data parser that drops redundant copies of packets already
-confirmed downstream.
+This document describes the microarchitecture of `dedup_ingress`, the component
+at the head of the UDP market-data parser that drops redundant copies of packets
+already confirmed complete.
 
 The system-level design document covers what this component does within the
 parser and how it connects to the stages around it. This document goes one
@@ -12,42 +12,33 @@ level deeper: the internal structure, the key design decisions and the
 reasoning behind them, the timing closure method and results, and the
 verification approach used to validate it.
 
-It is written for engineers reviewing or modifying this component directly:
-readers who need to understand not just its behaviour at the interface, but why
-the RTL is built the way it is.
-
-The parser receives the same market data stream on several redundant feeds.
-Every packet therefore arrives more than once, on different lines, at different
-times. Only the first copy to get through is useful. Every later copy is dead
-weight, and if it reaches the rest of the pipeline it wastes bandwidth in
+The parser receives the same stream on several redundant feeds, so every packet
+arrives more than once, on different lines, at different times. Only the first
+copy to get through is useful. Every later copy wastes bandwidth in
 `feed_buffer`, competes for the arbiter, and is checksummed for nothing.
 
-DEDUP_INGRESS removes those copies. It sits at the front of the pipeline, between the
-incoming feeds and `feed_buffer`, and it is the only block that knows a packet
-has already been delivered.
+A packet counts as delivered when CHECKSUM confirms it. That is the only
+feedback this block acts on. A copy whose sequence ID matches a confirmed
+packet is dropped. Everything else passes through untouched.
 
-A packet counts as delivered when CHECKSUM confirms it. That is the single
-source of truth, and it is the only feedback DEDUP_INGRESS acts on. A copy whose
-sequence number matches a confirmed packet is dropped. Everything else passes
-through untouched.
+DEDUP_INGRESS does not extract the sequence ID. `seq_extract` sits in front
+of it and delivers the sequence ID on `in_seq`, marked by `in_seq_valid` on the beat
+that carries it. This block only compares it.
 
-DEDUP_INGRESS does not act on the arbiter's `invalidate_feed`. Invalidation means one
-feed's copy was abandoned, not that the packet was delivered. If DEDUP_INGRESS dropped
-that sequence number on every feed, a healthy copy on another line would be
-discarded with it, and a packet that was still recoverable would be lost.
-Invalidation stays scoped to the feed it happened on, and `feed_buffer` handles
-it with a sticky per feed drop.
+That has a consequence worth stating plainly. The sequence ID does not arrive at SOP,
+it sits behind the IP and UDP headers, so at 64 bits per beat it lands in beat 3
+or later. The beats ahead of it carry no identity and are forwarded. A redundant
+copy therefore always gets its leading beats out of the door. They carry no
+sequence ID, so clearing them is handled downstream, once the parser asserts
+the signal that marks the packet invalid.
 
-DEDUP_INGRESS does not reorder. It holds one beat per feed in a pipeline
-register, added for timing. There is no FIFO and no queue.
+It does not reorder and it never originates a stall. Every stall comes from
+downstream: when `out_ready` goes low on a feed, that feed's output register
+freezes and its `in_ready` follows. A feed offering nothing is ready regardless.
 
-The block never originates a stall. No internal condition, full table included,
-holds up a feed. Every stall it applies comes from downstream: when `out_ready`
-goes low on a feed that is holding a beat, that feed's `in_ready` follows and
-upstream is held off. A feed holding nothing accepts regardless.
-
-It has no view of packet order or gaps in the sequence. Detecting a missing
-packet belongs to FIX_TRACKER and TIMER, not here.
+Every packet is assumed to carry a sequence ID. A frame too short to reach
+its own sequence field is malformed, and what this block does with one is
+undefined.
 
 ## 2. Interface
 
@@ -57,13 +48,11 @@ packet belongs to FIX_TRACKER and TIMER, not here.
 |---|---|---|
 | `N_FEEDS` | 4 | Number of redundant feeds. Each has its own input and output port. |
 | `DATA_W` | 64 | Datapath width in bits. |
-| `SEQ_W` | 32 | Width of the sequence number field. |
-| `SEQ_OFFSET` | 0 | Byte offset of the sequence number inside the first beat. |
+| `SEQ_W` | 32 | Width of the sequence ID. |
 | `CPT_DEPTH` | 8 | Number of completed packets held in the table. |
 
-`SEQ_OFFSET` and `SEQ_W` exist because venues place the sequence number
-differently. They must satisfy `SEQ_OFFSET*8 + SEQ_W <= DATA_W`, so the field
-lands inside the first beat. A compile-time guard enforces this.
+There is no `SEQ_OFFSET`. Where the sequence ID sits in a packet is `seq_extract`'s
+business, and this block never looks at `in_data`.
 
 ### Ports
 
@@ -76,492 +65,369 @@ lands inside the first beat. A compile-time guard enforces this.
 | `in_data` | in | `N_FEEDS` x `DATA_W` | Beat data, per feed. |
 | `in_sop` | in | `N_FEEDS` | First beat of a packet, per feed. |
 | `in_eop` | in | `N_FEEDS` | Last beat of a packet, per feed. |
-| `out_valid` | out | `N_FEEDS` | Beat valid downstream, per feed. Low when the copy is dropped. |
+| `in_seq` | in | `N_FEEDS` x `SEQ_W` | Sequence ID from `seq_extract`, per feed. |
+| `in_seq_valid` | in | `N_FEEDS` | High on the beat carrying the sequence ID, per feed. |
+| `out_valid` | out | `N_FEEDS` | Beat valid downstream. Low when the copy is dropped. |
 | `out_ready` | in | `N_FEEDS` | Downstream has room, per feed. |
 | `out_data` | out | `N_FEEDS` x `DATA_W` | Beat data, unchanged. |
 | `out_sop` | out | `N_FEEDS` | First beat marker, unchanged. |
 | `out_eop` | out | `N_FEEDS` | Last beat marker, unchanged. |
-| `out_seq` | out | `N_FEEDS` x `SEQ_W` | Sequence number of the packet on that feed. |
+| `out_seq` | out | `N_FEEDS` x `SEQ_W` | Sequence ID of the packet on that feed. |
+| `out_seq_valid` | out | `N_FEEDS` | High once the sequence ID has arrived on this packet. |
 | `cmpl_valid` | in | 1 | A packet has been confirmed by CHECKSUM. |
-| `cmpl_seq` | in | `SEQ_W` | Sequence number of that packet. |
+| `cmpl_seq` | in | `SEQ_W` | Sequence ID of that packet. |
 
 Each feed is an independent stream with its own handshake. There is no shared
 port and no arbitration.
 
-`out_seq` is produced so that no block downstream has to parse the header
-again. Every stage behind this one carries it through to `dedup_egress`, which
-needs it to make the final drop decision.
+`in_data` is registered and forwarded. Nothing here reads it.
 
-### Environment assumption
+`out_seq` is carried forward so no block downstream has to parse the header
+again. `out_seq_valid` says whether it means anything on this beat: the beats
+ahead of the sequence ID leave with a stale value and the valid low.
 
 `cmpl_valid` is not expected while a feed is blocked. If CHECKSUM cannot push
-its output downstream it does not complete a packet, so it does not send
-feedback. The RTL does not enforce this: a completion arriving while
-`out_ready` is low would still be written to the table. This assumption holds
-only while `out_ready` reaches CHECKSUM combinationally. If a register is ever
-added to that path, it must be revisited.
+its output downstream it does not complete a packet. The RTL does not enforce
+this, and it holds only while `out_ready` reaches CHECKSUM combinationally.
 
 ## 3. Microarchitecture
 
-DEDUP_INGRESS has three parts: sequence extraction with the per-feed context
-registers, the completed packets table, and the comparator tree.
+Four parts: the per feed sequence context, the completed packets table, the
+comparison, and the output register.
 
 ![DEDUP_INGRESS block diagram](dedup_ingress.svg)
 
-### Sequence extraction and `seq_regs`
+### Sequence context
 
-The sequence number appears once, in the first beat of a packet. It is sliced
-out combinationally at `SEQ_OFFSET` with width `SEQ_W`, giving
-`seq_extract[f]`.
+The sequence ID appears once per packet, on the beat `in_seq_valid` marks. Every beat
+after it carries none of its own, so the value has to be kept.
 
-Later beats of the same packet carry no sequence number, so the value has to be
-kept. `seq_regs[f]` holds the sequence number of the packet currently on feed
-f. It is written on any valid SOP beat, that is when
-`in_valid[f] && in_sop[f]`, without consulting `in_ready`. Section 5 covers
-why. It holds until the next SOP on that feed.
+`seq_regs[f]` holds the sequence ID of the packet currently on feed f.
+`seq_valid_regs[f]` says whether it has arrived yet. The pair is written on
+`in_valid[f] && in_seq_valid[f]`, without consulting `in_ready`. Section 5
+covers why. The valid is cleared on a valid SOP beat.
 
-The value used for comparison in a given cycle is `seq_sel[f]`. On an SOP beat
-it is the freshly extracted value, because `seq_regs[f]` has not been written
-yet. On every other beat it is `seq_regs[f]`.
+What gets compared in a given cycle:
 
 ```
-seq_sel[f] = in_sop[f] ? seq_extract[f] : seq_regs[f];
+seq_sel[f] = in_seq_valid[f] ? in_seq[f] : seq_regs[f];
+
+if      (in_seq_valid[f]) seq_sel_valid[f] = 1'b1;
+else if (in_sop[f])       seq_sel_valid[f] = 1'b0;
+else                      seq_sel_valid[f] = seq_valid_regs[f];
 ```
+
+The SOP term clears the valid combinationally. `seq_valid_regs` only clears at
+the clock edge, so without it the first beat of a packet would be compared
+against the sequence ID the previous packet left behind, and a healthy packet would
+lose that beat.
 
 ### Completed packets table
 
-The CPT holds the sequence numbers of the last `CPT_DEPTH` confirmed packets.
-It has three pieces of state: `cpt_seq`, the sequence numbers, `cpt_occupied`,
-one bit per entry, and `cpt_wr_ptr`, the write pointer.
+The CPT holds the sequence IDs of the last `CPT_DEPTH` confirmed packets: `cpt_seq`,
+`cpt_occupied` and `cpt_wr_ptr`.
 
-A completion writes unless its sequence number is already held. The pointer
-advances and wraps at `CPT_DEPTH`, so the oldest entry is overwritten once the
-table is full. There is no full condition, and nothing waits.
+Every completion writes. The pointer advances and wraps, so the oldest entry is
+overwritten once the table is full. There is no full condition and nothing
+waits. A repeat is not suppressed; section 5 covers why.
 
-The suppression exists because a packet can complete more than once. A copy
-that got past this block before its twin completed is still buffered, still
-served by the arbiter, and still checksummed, so CHECKSUM raises a second
-completion for a sequence number the table already holds. Writing it again
-would consume an entry and evict a different, still useful value, shortening
-the window for no gain. `cmpl_present` is a separate comparison from the drop
-decision: that one compares each feed's `seq_sel`, this one compares
-`cmpl_seq`.
+### Comparison
+
+Every cycle, `seq_sel[f]` is compared against every occupied entry and against
+`cmpl_seq` if a completion is arriving. Both are qualified by `seq_sel_valid[f]`,
+so a feed with no sequence ID yet matches nothing.
 
 ```
-cmpl_match[e] = cpt_occupied[e] && (cpt_seq[e] == cmpl_seq);
-cmpl_present  = |cmpl_match;
-```
+cpt_match[f][e] = seq_sel_valid[f] && cpt_occupied[e] && (cpt_seq[e] == seq_sel[f]);
+bypass_match[f] = seq_sel_valid[f] && cmpl_valid && (cmpl_seq == seq_sel[f]);
 
-When `cmpl_present` is high the write is skipped and `cpt_wr_ptr` does not
-move.
-
-### Comparator tree
-
-The tree runs every cycle. For each feed, `seq_sel[f]` is compared against
-every occupied CPT entry and against `cmpl_seq` if a completion is arriving
-this cycle.
-
-```
-cpt_match[f][e] = cpt_occupied[e] && (cpt_seq[e] == seq_sel[f]);
-bypass_match[f] = cmpl_valid && (cmpl_seq == seq_sel[f]);
+drop[f] = in_valid[f] && (|cpt_match[f] || bypass_match[f]);
 ```
 
 The second term is the same-cycle bypass. A completion is not readable in the
-table until the next cycle, so without it a copy arriving in the same cycle as
-its own completion would pass through.
+table until the next cycle, so without it a copy arriving alongside its own
+completion would pass through.
 
 This is the widest logic in the block: `N_FEEDS * (CPT_DEPTH + 1)` equality
-comparisons of `SEQ_W` bits each, all in parallel. Each feed's comparisons are
-independent of every other feed's.
+comparisons of `SEQ_W` bits, all in parallel and all independent per feed.
 
-The results are registered. The drop decision is made in the next cycle, from
-the registered results, and the subsection below covers that.
+### Output register
 
-### The pipeline cut
-
-The comparator results are registered together with the beat they belong to.
+The beat and its drop decision are registered at the boundary, so every output
+port comes from a flop and the path into `feed_buffer` starts at a register.
 
 ```
-valid_q[f]        <= in_valid[f];   // enabled by in_ready
-data_q[f]         <= in_data[f];    // enabled by in_valid && in_ready
-seq_q[f]          <= seq_sel[f];
-cpt_match_q[f]    <= cpt_match[f];
-bypass_match_q[f] <= bypass_match[f];
+if (out_ready[f])
+    out_valid[f] <= in_valid[f] && !drop[f];
+
+if (out_ready[f] && in_valid[f]) begin
+    out_data[f] <= in_data[f];
+    ...
+end
 ```
 
-The drop decision is then one OR reduction on the far side:
+The enable is `out_ready`. While downstream is closed that feed freezes.
 
-```
-drop[f] = valid_q[f] && (|cpt_match_q[f] || bypass_match_q[f]);
-```
-
-This splits the block into two cycles. The comparators run in the cycle a beat
-is presented. The OR reduction, the drop, the ready path and the outputs run in
-the next. The wide equality comparisons and the logic that depends on them no
-longer share a cycle.
-
-`valid_q` is enabled by `in_ready` alone. When `in_ready` is high and
-`in_valid` is low, `valid_q` takes a zero and the stage goes empty. The payload
-and the match results are enabled by `in_valid && in_ready`, so a held beat and
-its results stay stable together across a stall.
+`drop` is kept out of the payload enable deliberately. It is the slowest signal
+in the block, and on the clock enable of the data register it would sit in front
+of `DATA_W` flops per feed. It drives `out_valid` instead, one flop per feed.
+The payload loads on a dropped beat too, which nothing can see.
 
 ## 4. Behaviour
 
 ### One cycle datapath
 
-One register sits between input and output. `out_data`, `out_sop` and
-`out_eop` are the registered input signals, unchanged in value. `out_seq` is
-`seq_q`. A beat presented on `in_data[f]` appears on `out_data[f]` one cycle
-later.
+One register between input and output. `out_data`, `out_sop` and `out_eop` are
+the registered input signals, unchanged. A beat presented on `in_data[f]`
+appears on `out_data[f]` one cycle later.
 
-The only thing DEDUP_INGRESS does to the stream is withhold `out_valid[f]` when that
-feed's copy is being dropped:
+The only thing this block does to the stream is withhold `out_valid[f]` when
+that feed's copy is being dropped. A drop is not a special output state:
+downstream sees `out_valid` low, the same as an idle feed.
 
-```
-out_valid[f] = valid_q[f] && !drop[f];
-```
+The other registers hold state and are not in the datapath.
 
-The other registers in the block, `seq_regs`, `cpt_seq`, `cpt_occupied` and
-`cpt_wr_ptr`, hold state and are not in the datapath.
+### The beats ahead of the sequence ID
 
-### The drop decision
+On those beats `seq_sel_valid[f]` is low, nothing matches, and they are
+forwarded whatever the table holds. They leave with `out_seq_valid[f]` low.
 
-A copy is dropped when its sequence number matches a packet already confirmed
-by CHECKSUM. The match is against the table, or against a completion arriving
-in the same cycle.
-
-A drop is not a special output state. Downstream sees `out_valid[f]` low, which
-is the same as an idle feed. The beat is discarded and nothing marks it.
-
-### Same-cycle bypass
-
-The CPT write happens on the clock edge, so a completion arriving in cycle N is
-only readable in the table from cycle N+1. Without the bypass, a copy arriving
-in cycle N alongside its own completion would be forwarded, and only the copies
-from N+1 onwards would be dropped.
-
-The bypass compares `seq_sel[f]` against `cmpl_seq` directly, in the same cycle
-the completion arrives. The result is registered with the beat, so the drop
-appears on `out_valid` one cycle later, along with the beat it applies to.
+This is not a gap in the comparison, it is what the data allows. Those beats
+carry no identity. The alternative is holding them until the sequence ID arrives,
+which means a buffer and a different block.
 
 ### Mid packet kill
 
-The comparison runs on every beat, not only on SOP. So a packet can be killed
-part way through.
+The comparison runs on every beat, so a packet can be killed part way through,
+and in practice always is.
 
-For example, feed 0 is streaming packet 100. Beats 1 and 2 pass through and
-land in `feed_buffer`. On beat 3, another feed's copy of packet 100 completes.
-From that cycle `seq_sel[0]` matches, so beat 3 and everything after it is
-dropped.
+Feed 0 is streaming packet 100. Beats 0 to 2 carry no sequence ID and pass into
+`feed_buffer`. On beat 3 the sequence ID arrives and matches. From there everything
+is dropped.
 
-That leaves beats 1 and 2 sitting in `feed_buffer` with no EOP coming. They are
-not recalled. `feed_buffer` holds no completed packets table and takes no
-completion feedback, so those beats are served like any others. The arbiter
-forwards them, then waits for an EOP that never comes, gives up after
-`HICCUP_CYCLES`, and moves on. The beats themselves are dropped at
-`dedup_egress`, which sees a sequence number that has already completed.
+That leaves beats 0 to 2 in `feed_buffer` with no EOP coming. They are not
+recalled. `feed_buffer` takes no completion feedback, so they are served like
+any others. The arbiter forwards them, waits for an EOP that never comes, gives
+up after `HICCUP_CYCLES`, and moves on. Those beats carry no sequence ID, so
+no stage downstream can identify them from the stream alone.
 
-The cost of this is the arbiter's hiccup timeout, paid once per mid packet
-kill. The alternative, acting on completions inside `feed_buffer`, was
-rejected: a completion always arrives after the decision to forward has been
-made, so `feed_buffer` would either have to cut a packet in half, leaving the
-arbiter holding a fragment with nothing behind it to clean up, or commit at SOP
-and let the rest through anyway. Section 5 of the system level document covers
+The cost is that hiccup timeout, paid once per kill. Acting on completions
+inside `feed_buffer` was rejected: a completion always arrives after the
+decision to forward has been made. Section 5 of the system level document covers
 this.
-
-The arbiter cannot do this. `invalidate_feed` only fires for the feed the
-arbiter is serving. Here it may never have selected feed 0 at all.
 
 ### Flow control
 
 ```
-in_ready[f] = ~valid_q[f] | out_ready[f] | drop[f];
+in_ready[f] = ~in_valid[f] | out_ready[f] | drop[f];
 ```
 
-Per feed, combinational, three terms.
+Per feed, combinational, three terms. A feed offering nothing is ready. A beat
+is taken when downstream has room, or when it is being dropped and needs no room
+at all.
 
-A feed holding nothing accepts, because there is nothing to release first. A
-feed holding a beat releases it when downstream has room, or when the beat is
-being dropped and therefore needs no room at all.
+The drop term matters when downstream is full. A dropped beat never uses a FIFO
+slot, so holding it behind a full FIFO would stall a feed for a beat that was
+going to be discarded. This puts the drop on the ready path deliberately.
 
-The drop term matters when downstream is full. A dropped beat never reaches
-`feed_buffer` and never uses a FIFO slot, so holding it behind a full FIFO
-would stall a feed for a beat that was going to be discarded. This puts the
-drop on the ready path deliberately.
+While `out_ready[f]` is low and a beat is offered, `in_ready[f]` is low and the
+register is frozen. The beat stays on the bus and the sender presents it again.
 
 ## 5. Design decisions
 
-### Completions, not invalidation
+### Extraction belongs in its own block
 
-DEDUP_INGRESS acts only on CHECKSUM completions. It ignores the arbiter's
-`invalidate_feed`.
+Earlier versions sliced the sequence ID out of the first beat here, with a
+`SEQ_OFFSET` parameter. That work now lives in `seq_extract`.
 
-Invalidation means one feed's copy was abandoned. It does not mean the packet
-was delivered. If DEDUP_INGRESS dropped that sequence number everywhere, a healthy copy
-on another feed would be discarded with it, and a packet that could still have
-been served would be lost.
+One block owns the packet format. This one holds less per feed state, has no
+view of `in_data`, and the extraction is verified once rather than once per
+consumer.
 
-A completion is the only signal that says a packet is truly finished.
+The cost is the window above, and it is not a consequence of the split. A sequence ID
+sitting behind the IP and UDP headers was never readable at SOP. The old version
+only appeared to manage it because its guard required the field to fit inside
+the first beat, which real venue layouts do not.
 
-### Evict oldest, not age out
+### Overwrite the oldest, not age out
 
-Two policies were considered for removing entries from the CPT: overwrite the
-oldest when a new completion arrives, or hold each entry for a fixed number of
-cycles and then clear it.
+Both policies answer the same question: how long a completed sequence ID stays
+protected. Overwriting measures that in completions, a timer measures it in
+cycles. Completions is the better unit, because what matters is how many packets
+can go by before a late copy shows up. It is also cheaper, with no counter per
+entry.
 
-Both answer the same question, how long a completed sequence number stays
-protected. Evict-oldest measures that in completions, the timer measures it in
-cycles. Completions is the better unit, because what matters is how many
-packets can go by before a late copy shows up, and that is a packet count. It
-is also cheaper: no counter per entry.
+Removing an entry on EOP was also rejected. Later copies arrive after that
+point, which is the whole reason the entry exists.
 
-Removing an entry when the packet's EOP is seen was also considered and
-rejected. Later copies arrive on other feeds after that point, which is the
-whole reason the entry exists.
+### A repeated completion is not suppressed
 
-### No stalling on a full table
+An earlier version compared `cmpl_seq` against the table and skipped the write
+when the sequence ID was already held. That comparison has been removed.
 
-The table never signals full and never holds anything up. A completion always
-writes.
+A second completion can only happen if a second copy got all the way through,
+and that copy could only get through if the table no longer held the first
+entry. By the time the repeat arrives there is nothing left to duplicate.
 
-Backpressuring CHECKSUM because a bookkeeping table is full would push
-backpressure the wrong way through the pipeline and would stall the output path
-for no useful reason.
+Two copies arriving close together both pass this block and the second dies at
+`dedup_egress`. Copies far enough apart for the entry to have gone are outside
+what a table of any size can catch.
 
-The cost is that a late copy whose sequence number has been evicted passes
-through. That is accepted, see section 7.
+The comparison was also the most expensive thing in the block, and removing it
+is where most of the timing margin came from.
 
 ### No skid buffer
 
-A skid buffer is needed when a beat can arrive that cannot be taken. That
-happens when the ready path is registered, because upstream then acts on stale
-information and commits a beat that has nowhere to go.
+A skid buffer is needed when the ready path is registered, because upstream then
+acts on stale information and commits a beat with nowhere to go.
 
-The pipeline register added for timing sits on the datapath only. The ready
-path stays combinational: `in_ready` is computed from `valid_q`, `out_ready`
-and `drop` with no register in the way, so upstream sees the decision in the
-cycle it needs it. Upstream never commits a beat DEDUP_INGRESS cannot take, so
-there is nothing to absorb.
-
-If a register is ever added to the ready path, this has to be revisited.
+The register sits on the datapath only. `in_ready` is computed from `in_valid`,
+`out_ready` and `drop` with nothing in the way, so upstream sees the decision in
+the cycle it needs it. If a register is ever added to the ready path, this has
+to be revisited.
 
 ### The sequence register is not part of the handshake
 
-`seq_regs[f]` is written on `in_valid[f] && in_sop[f]`. There is no `in_ready`
-term, so a SOP beat is captured whether or not it is accepted that cycle.
+`seq_regs[f]` and `seq_valid_regs[f]` are written on
+`in_valid[f] && in_seq_valid[f]`, with no `in_ready` term.
 
-This is a timing decision. `in_ready` is driven by `drop`, which sits at the far
-end of the comparator tree. Putting `in_ready` in this enable would put the
-whole tree on a path ending at this register's clock enable, and that was the
-path that failed STA at WNS -0.442 ns.
+This is a timing decision. `in_ready` is driven by `drop`, at the far end of the
+comparison, so putting it in this enable would end that path on this register's
+clock enable.
 
 Writing before acceptance is safe. While `in_ready` is low the sender holds
-`in_valid` and `in_data` unchanged, so the SOP beat stays on the bus. The write
-fires every cycle of the stall and stores the same number every time.
+`in_valid`, `in_seq` and `in_seq_valid` unchanged, so the write fires every
+cycle of the stall and stores the same sequence ID every time. The stall always ends,
+and the sender cannot withdraw the beat, so the sequence ID written early is the one
+eventually accepted.
 
-Example. A SOP carrying sequence 100 arrives on feed 0 while `in_ready` is low.
-`seq_regs[0]` is written with 100 straight away, before the beat is accepted.
-The stall lasts three cycles, and the same 100 is written on each of them. On
-the fourth cycle `in_ready` goes high and the beat is accepted. `seq_regs[0]`
-already holds 100, which is the right value, so the beats that follow compare
-against the right number.
+Acceptance is still `in_valid && in_ready` on the datapath. These registers only
+observe the beat while it is present.
 
-The stall always ends. Nothing inside this block can hold a feed forever, and
-the sender is not allowed to withdraw the beat, so the SOP that was written
-early is always the SOP that eventually gets accepted.
+### An explicit valid on the outgoing sequence ID
 
-`seq_regs` is not part of the acceptance protocol. Acceptance is still
-`in_valid && in_ready` on the datapath. This register only observes the SOP beat
-while it is present.
+`out_seq` carries a stale value on the beats ahead of the sequence ID, because the
+register holds whatever the last packet left in it.
+
+The alternative was leaving downstream to work it out from `out_sop`. That
+works, but it makes every consumer reimplement the same rule, and one that got
+it wrong would compare against another packet's sequence ID with nothing to catch it.
+One output bit says it directly instead.
 
 ### CPT_DEPTH of 8, parameterised
 
-The depth sets how long a completed sequence number stays protected. What it
-needs to cover is the gap between the first and last copy of the same packet
-arriving on different feeds.
+The depth sets how long a completed sequence ID stays protected, and what it needs to
+cover is the gap between the first and last copy of a packet arriving on
+different feeds.
 
-Deeper is safer against late copies but costs timing, since the comparator tree
-grows as `N_FEEDS * (CPT_DEPTH + 1)`. 8 is the starting point. The parameter is
-there so the depth can be swept against STA.
+Deeper is safer but costs timing, since the comparison grows as
+`N_FEEDS * (CPT_DEPTH + 1)`. 8 is the starting point, and the parameter is there
+so the depth can be swept against STA.
 
 ## 6. Timing
 
 Synthesised for Xilinx Kintex-7 `xc7k160tffg676-3` at 325 MHz, a 3.077 ns
 period.
 
-### Measuring a block with no registers in the datapath
+### Measuring with the ports flopped
 
-The block now has a register on the datapath, so some paths through it are real
-register to register paths and STA can time them. The ports are still
-unconstrained, though. A path from `in_data` to the pipeline register starts at
-an input port with no arrival time, and a path from the register to `out_data`
-ends at an output port with no required time. Neither is timed, and the path
-from `cmpl_seq` into the comparators is one of them.
-
-The alternative is to constrain the ports with `set_input_delay` and
-`set_output_delay`. That works, but it measures the block against a budget
-chosen by hand, so the answer depends on the numbers picked.
-
-The method used here is `sta/dedup_ingress_sta_harness.sv`. It instantiates `dedup_ingress` and
-puts a register on every input and every output. The combinational datapath
-becomes a real register to register path, so STA measures the logic depth of
-the block itself with no assumed budget. The flops belong to the measurement,
-not to the design, and the harness is not part of the pipeline.
+The block has a register on the datapath, so paths inside it are real register
+to register paths. The ports are not, so `sta/dedup_ingress_sta_harness.sv`
+instantiates the block and puts a flop on every input and output. Every path
+then starts and ends at a flop, and STA measures the logic depth of the block
+with no assumed budget. The flops belong to the measurement, not the design.
 
 ### Result
 
-WNS +0.240 ns post synthesis, with zero warnings.
+WNS **+0.122 ns** post synthesis, with zero warnings.
 
-Before the pipeline register the same design measured WNS -0.442 ns. The
-failing path ran from `cmpl_seq` through a 32 bit equality, the OR reduction,
-`drop` and `in_ready`, and ended on the clock enable of `seq_regs`:
-
-```
-Source:       cmpl_seq_q_reg[3]/C
-Destination:  u_dedup_ingress/seq_regs_reg[0][0]/CE
-Data Path Delay: 3.105 ns  (logic 0.975 ns, route 2.130 ns)
-Logic Levels: 7  (CARRY4=3, LUT2=1, LUT4=1, LUT6=2)
-```
-
-Two thirds of that delay is routing. The three CARRY4s are the equality
-comparison, which Vivado maps onto the carry chain rather than LUTs.
-
-The cut removed that path in two ways. The comparator results are now
-registered, so the OR reduction and the drop no longer share a cycle with the
-comparison. And `seq_regs` no longer takes `in_ready` in its enable, so the tree
-no longer ends on that clock enable at all.
-
-### What the completion comparison cost
-
-Before `cmpl_present` was added the same path measured WNS +0.513 ns, with a
-data path delay of 2.425 ns (logic 0.971 ns, route 1.454 ns). The logic barely
-moved. The whole 0.334 ns went into routing.
-
-The reason is fanout. Every `cpt_seq` bit used to drive `N_FEEDS` comparators.
-It now drives `N_FEEDS + 1`, because `cmpl_present` reads the same registers.
-More loads on a net means a longer estimated route, and those nets sit on the
-critical path. The new comparison never becomes critical itself; it makes the
-existing path more expensive to reach.
+The worst path runs from `in_seq` through the comparison and the drop, and ends
+at `out_valid`.
 
 ### If depth grows
 
-The margin is 0.240 ns on a 3.077 ns period. Raising `CPT_DEPTH` widens the
-tree and eats into it, both through the extra comparators and through the
-higher fanout on `cpt_seq`.
-
-The cut between the comparators and the OR reduction has already been taken,
-and it cost one cycle of latency. The next one, if it is ever needed, splits the
-equality itself: compare the low half of `SEQ_W` in one cycle and the high half
-in the next, then AND the results. That halves the carry chain and costs another
-cycle.
+Raising `CPT_DEPTH` widens the comparison and eats into the margin, both through
+the extra comparators and through the higher fanout on `cpt_seq`.
 
 ## 7. Verification
 
-25 tests under `verification/`, run with cocotb against Verilator:
+29 tests under `verification/`, cocotb against Verilator.
 
-```
+```bash
 cd verification && make
 ```
 
+### The beat the sequence ID arrives on
+
+This block does not fix that beat, `seq_extract` does, and it depends on the
+venue's header layout. So it is a parameter of the tests. The directed suites
+run over 3, 4 and 7, fixed so a failure reproduces without chasing a seed. The
+random suite draws it per packet.
+
 ### Golden model
 
-`dedup_ingress_common.py` holds a cycle accurate model of the block: the CPT,
-the write pointer, the per feed sequence registers, and the pipeline register
-with its match results.
+`dedup_ingress_common.py` models the block cycle by cycle: the table, the write
+pointer, the per feed sequence registers and their valids, and the output
+register.
 
-It has two methods. `drive` puts this cycle's inputs on the model, the way
-wires hold them. `evaluate` computes `in_ready`, the sequence context and the
-comparator results from the flops and the table as they stand, then loads the
-flops and writes the table, then reports the outputs. The order matters: those
-three are combinational, so they have to be computed before anything is
-written.
+`step` drives the DUT and the model together, reads after the clock edge, and
+asserts they agree on every output. `out_seq` is checked only when
+`out_seq_valid` is high, since outside that it holds whatever the last packet
+left behind.
 
-`DedupIngressTB.step` runs one cycle. It drives the staged stimulus to the DUT
-and to the model at the same point, waits for the clock edge, reads the DUT at
-the `ReadOnly` phase, and asserts the two agree on `in_ready`, `out_valid` and,
-when a beat is being presented, on `out_data`, `out_sop`, `out_eop` and
-`out_seq`.
+Reading after the edge is what makes the tests direct: the outputs `step`
+returns belong to the beat driven in that call. `in_ready` is the exception,
+being combinational, so `send_packet` holds it and uses it on the next pass.
 
-Reading after the edge is what makes the tests direct. The outputs `step`
-returns belong to the beat driven in that same call, so a test presents a beat
-and looks at the result of that one `step`. Reading before the edge would
-return the previous beat, and a test would need a second `step` to see the one
-it cares about. That second cycle drives nothing, so any check for a beat being
-dropped would pass on an empty cycle whether the block worked or not.
+The check runs on every cycle of every test, so a directed test only asserts the
+one thing it is about.
 
-`in_ready` is the exception. It is combinational from `valid_q`, `out_ready`
-and `drop`, and it applies to whatever beat is being offered at that moment.
-The stream never stops, so the value read after the edge is the one for the
-beat about to be driven, not the one for the beat that has already been
-accepted. `send_packet` holds it and uses it on the next pass.
+### Coverage
 
-The check runs on every cycle of every test, directed and random alike, so a
-directed test only has to set up its scenario and assert the one thing it is
-about.
+**Passthrough.** Three tests. With an empty table, every beat passes. With a
+table holding entries that no arriving sequence ID matches, every beat still passes.
+With four feeds streaming four different packets at once, none is dropped.
 
-### Directed coverage
+**The window before the sequence ID.** The beats ahead of it are forwarded with
+`out_seq_valid` low and `in_ready` high, even when the sequence ID the packet is
+about to declare is already in the table. The beat the sequence ID lands on dies.
 
-**Passthrough.** An empty table, and a populated table holding sequence numbers
-that never match, both leave every beat untouched. Four packets in flight on
-four feeds at once also pass.
-
-**Drop.** A completed packet's later copy is dropped, on one feed and on all
-feeds at once.
+**Drop.** A completed packet's later copy is dropped, on one feed and on all at
+once. The leading beats pass and the tail dies, asserted separately. Once the
+sequence ID has matched, every later beat dies from `seq_regs` alone.
 
 **Same-cycle bypass.** A copy arriving in the very cycle its completion arrives
-is dropped, and the entry then persists into the table from the next cycle.
+is dropped, and the entry persists into the table from the next cycle. A third
+feed matching neither path survives.
 
-**Both paths together.** One feed matching a table entry and another matching
-the live completion in the same cycle, with a third feed matching neither and
-surviving.
-
-**Table.** A completion is written whether or not it matched anything that
-cycle. The write pointer advances cleanly across a full table. One completion
-past full evicts the oldest entry, and everything newer is still held.
-
-**Repeated completion.** A completion whose sequence number the table already
-holds evicts nothing, and does not move the write pointer. The two are separate
-failures and get a test each. The first fills the table, repeats the newest
-entry three times, and checks every original is still held. The second fills the
-table, repeats the newest entry once, then completes one genuinely new sequence
-number, and checks that exactly one eviction happened rather than two. A write
-that was skipped but still advanced the pointer passes the first test and fails
-the second.
-
-**Late copy.** A copy whose sequence number has been evicted passes through.
-Asserted as intended behaviour, so a future change to the eviction policy has
-to be deliberate.
+**Table.** A completion is written whether or not it matched. The pointer
+advances cleanly across a full table. One completion past full takes the oldest
+slot. A repeat takes a slot like any other. A copy whose sequence ID has been
+overwritten passes through, asserted as intended behaviour.
 
 **Mid packet kill.** A feed streaming a packet that completes elsewhere is cut
-off from that cycle on. Its next packet is unaffected, and a second feed
-carrying a different packet is untouched.
+off from that cycle on, and the kill lands on the completion's own cycle. Its
+next packet is unaffected and a second feed is untouched.
 
-**Flow control.** A stage holding nothing accepts even with downstream closed.
-A feed follows `out_ready` once it is holding a beat. A dropped copy is
-accepted even when downstream is closed. A passing copy is not. Stalling one
-feed leaves the others streaming. A SOP held on the bus during a stall still
-lands in `seq_regs`, checked on every feed, and all four feeds hold their own
-number at the same time.
+**Flow control.** `in_ready` stays high, even if `out_ready` goes to zero, when
+there is no valid input on the feed. A feed
+follows `out_ready` once it is offering a beat. A held beat does not move for
+the whole stall. `in_ready` stays high when the beat matches a completed packet,
+even if `out_ready` is zero, since that beat never goes downstream. Otherwise
+`in_ready` follows `out_ready`. Stalling one feed leaves the others streaming. A beat held on the
+bus during a stall still lands in `seq_regs`, and all four feeds hold their own
+sequence ID at once.
 
-### Constrained random
-
-Two regimes, both checked against the golden model every cycle.
-
-The first uses a 64 value sequence pool, so duplicates are occasional and most
-traffic passes. It checks the block over 3000 cycles of normal traffic.
-
-The second uses a pool of 6, so nearly everything collides and the table stays
-saturated. It hammers the comparator and the eviction path, which the first
-barely touches.
-
-Both apply independent per feed backpressure and keep SOP and EOP coherent per
-feed.
+**Random.** Three regimes: normal traffic with a 64 value pool, a pool of 6 so
+nearly everything collides, and downstream closed 70% of the time. All checked
+against the model every cycle.
 
 ### What this block cannot catch
 
-The table only remembers the last 8 completed packets. If a copy arrives very
-late, after 8 more packets have completed, its sequence number is gone from the
-table and the copy passes through.
+The table remembers the last 8 completed packets. A copy arriving after 8 more
+have completed finds its sequence ID gone and passes through.
 
-This is expected. It comes from the fixed table size. The straggler test checks
-it, so if the table ever changes, someone has to change that test on purpose.
+The leading beats of every duplicate are forwarded, because the sequence ID has not
+arrived when they go past. They carry no sequence ID, so nothing downstream
+can identify them from the stream alone. Clearing them is the consumer's job,
+once the parser asserts the signal that marks the packet invalid.

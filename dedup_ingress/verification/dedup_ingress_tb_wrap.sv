@@ -14,7 +14,6 @@ module dedup_ingress_tb_wrap #(
     parameter int N_FEEDS    = 4,
     parameter int DATA_W     = 64,
     parameter int SEQ_W      = 32,
-    parameter int SEQ_OFFSET = 0,
     parameter int CPT_DEPTH  = 8
 ) (
     input  logic                          clk,
@@ -25,6 +24,8 @@ module dedup_ingress_tb_wrap #(
     input  logic [N_FEEDS*DATA_W-1:0]     in_data_flat,
     input  logic [N_FEEDS-1:0]            in_sop,
     input  logic [N_FEEDS-1:0]            in_eop,
+    input  logic [N_FEEDS*SEQ_W-1:0]      in_seq_flat,
+    input  logic [N_FEEDS-1:0]            in_seq_valid,
 
     output logic [N_FEEDS-1:0]            out_valid,
     input  logic [N_FEEDS-1:0]            out_ready,
@@ -32,18 +33,21 @@ module dedup_ingress_tb_wrap #(
     output logic [N_FEEDS-1:0]            out_sop,
     output logic [N_FEEDS-1:0]            out_eop,
     output logic [N_FEEDS*SEQ_W-1:0]      out_seq_flat,
+    output logic [N_FEEDS-1:0]            out_seq_valid,
 
     input  logic                          cmpl_valid,
     input  logic [SEQ_W-1:0]              cmpl_seq
 );
 
     logic [N_FEEDS-1:0][DATA_W-1:0] in_data;
+    logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq;
     logic [N_FEEDS-1:0][DATA_W-1:0] out_data;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  out_seq;
 
     always_comb begin
         for (int f = 0; f < N_FEEDS; f++) begin
             in_data[f] = in_data_flat[f*DATA_W +: DATA_W];
+            in_seq[f]  = in_seq_flat[f*SEQ_W  +: SEQ_W];
         end
     end
 
@@ -58,27 +62,29 @@ module dedup_ingress_tb_wrap #(
         .N_FEEDS    (N_FEEDS),
         .DATA_W     (DATA_W),
         .SEQ_W      (SEQ_W),
-        .SEQ_OFFSET (SEQ_OFFSET),
         .CPT_DEPTH  (CPT_DEPTH)
     ) u_dedup_ingress (
         .clk        (clk),
         .rst_n      (rst_n),
 
-        .in_valid   (in_valid),
-        .in_ready   (in_ready),
-        .in_data    (in_data),
-        .in_sop     (in_sop),
-        .in_eop     (in_eop),
+        .in_valid     (in_valid),
+        .in_ready     (in_ready),
+        .in_data      (in_data),
+        .in_sop       (in_sop),
+        .in_eop       (in_eop),
+        .in_seq       (in_seq),
+        .in_seq_valid (in_seq_valid),
 
-        .out_valid  (out_valid),
-        .out_ready  (out_ready),
-        .out_data   (out_data),
-        .out_sop    (out_sop),
-        .out_eop    (out_eop),
-        .out_seq    (out_seq),
+        .out_valid    (out_valid),
+        .out_ready    (out_ready),
+        .out_data     (out_data),
+        .out_sop      (out_sop),
+        .out_eop      (out_eop),
+        .out_seq       (out_seq),
+        .out_seq_valid (out_seq_valid),
 
-        .cmpl_valid (cmpl_valid),
-        .cmpl_seq   (cmpl_seq)
+        .cmpl_valid   (cmpl_valid),
+        .cmpl_seq     (cmpl_seq)
     );
 
 endmodule
