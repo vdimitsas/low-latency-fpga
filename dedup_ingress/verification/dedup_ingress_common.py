@@ -39,6 +39,10 @@ CLK_PERIOD_NS = 10
 SEQ_MASK = (1 << SEQ_W) - 1
 DATA_MASK = (1 << DATA_W) - 1
 
+BYTES_PER_BEAT = DATA_W // 8
+BYTE_CNT_W = (BYTES_PER_BEAT - 1).bit_length()
+BYTE_CNT_MAX = BYTES_PER_BEAT - 1
+
 
 def _pack(values, width):
     word = 0
@@ -90,6 +94,7 @@ class GoldenDedupIngress:
         self.in_eop = [0] * self.n_feeds
         self.in_seq = [0] * self.n_feeds
         self.in_seq_valid = [0] * self.n_feeds
+        self.in_byte_cnt = [0] * self.n_feeds
         self.out_ready = [0] * self.n_feeds
         self.cmpl_valid = 0
         self.cmpl_seq = 0
@@ -107,9 +112,10 @@ class GoldenDedupIngress:
         self.out_eop_q = [0] * self.n_feeds
         self.out_seq_q = [0] * self.n_feeds
         self.out_seq_valid_q = [0] * self.n_feeds
+        self.out_byte_cnt_q = [0] * self.n_feeds
 
     def drive(self, in_valid, in_data, in_sop, in_eop, in_seq, in_seq_valid,
-              out_ready, cmpl_valid, cmpl_seq):
+              in_byte_cnt, out_ready, cmpl_valid, cmpl_seq):
         """Put this cycle's inputs on the model, the way wires hold them."""
         self.in_valid = list(in_valid)
         self.in_data = []
@@ -121,6 +127,7 @@ class GoldenDedupIngress:
         for value in in_seq:
             self.in_seq.append(value & SEQ_MASK)
         self.in_seq_valid = list(in_seq_valid)
+        self.in_byte_cnt = list(in_byte_cnt)
         self.out_ready = list(out_ready)
         self.cmpl_valid = cmpl_valid
         self.cmpl_seq = cmpl_seq & SEQ_MASK
@@ -210,6 +217,7 @@ class GoldenDedupIngress:
                 self.out_eop_q[f] = self.in_eop[f]
                 self.out_seq_q[f] = seq_sel[f]
                 self.out_seq_valid_q[f] = seq_sel_valid[f]
+                self.out_byte_cnt_q[f] = self.in_byte_cnt[f]
 
         # sequence context: cleared on SOP, written on the beat in_seq_valid
         # marks. No in_ready term, so a beat held across a stall writes the
@@ -236,6 +244,7 @@ class GoldenDedupIngress:
             "out_eop": list(self.out_eop_q),
             "out_seq": list(self.out_seq_q),
             "out_seq_valid": list(self.out_seq_valid_q),
+            "out_byte_cnt": list(self.out_byte_cnt_q),
         }
 
 
@@ -255,11 +264,12 @@ class DedupIngressTB:
         self.in_eop = [0] * self.n_feeds
         self.in_seq = [0] * self.n_feeds
         self.in_seq_valid = [0] * self.n_feeds
+        self.in_byte_cnt = [BYTE_CNT_MAX] * self.n_feeds
         self.out_ready = [1] * self.n_feeds
         self.cmpl_valid = 0
         self.cmpl_seq = 0
 
-    def present(self, feed, seq=None, data=None, sop=0, eop=0):
+    def present(self, feed, seq=None, data=None, sop=0, eop=0, byte_cnt=None):
         """Stage one feed's stimulus for the coming cycle.
 
         Passing seq marks this beat as the one carrying the sequence number,
@@ -273,6 +283,11 @@ class DedupIngressTB:
             self.in_data[feed] = data & DATA_MASK
         self.in_sop[feed] = sop
         self.in_eop[feed] = eop
+
+        if byte_cnt is None:
+            self.in_byte_cnt[feed] = BYTE_CNT_MAX
+        else:
+            self.in_byte_cnt[feed] = byte_cnt
 
         if seq is None:
             self.in_seq_valid[feed] = 0
@@ -299,6 +314,7 @@ class DedupIngressTB:
         d.in_data_flat.value = _pack(self.in_data, DATA_W)
         d.in_seq_flat.value = _pack(self.in_seq, SEQ_W)
         d.in_seq_valid.value = _pack(self.in_seq_valid, 1)
+        d.in_byte_cnt_flat.value = _pack(self.in_byte_cnt, BYTE_CNT_W)
         d.out_ready.value = _pack(self.out_ready, 1)
         d.cmpl_valid.value = self.cmpl_valid
         d.cmpl_seq.value = self.cmpl_seq
@@ -313,6 +329,8 @@ class DedupIngressTB:
             "out_data": _unpack(int(d.out_data_flat.value), DATA_W, self.n_feeds),
             "out_seq": _unpack(int(d.out_seq_flat.value), SEQ_W, self.n_feeds),
             "out_seq_valid": _bits(int(d.out_seq_valid.value), self.n_feeds),
+            "out_byte_cnt": _unpack(int(d.out_byte_cnt_flat.value), BYTE_CNT_W,
+                                    self.n_feeds),
         }
 
     async def start(self):
@@ -346,6 +364,7 @@ class DedupIngressTB:
             in_eop=self.in_eop,
             in_seq=self.in_seq,
             in_seq_valid=self.in_seq_valid,
+            in_byte_cnt=self.in_byte_cnt,
             out_ready=self.out_ready,
             cmpl_valid=self.cmpl_valid,
             cmpl_seq=self.cmpl_seq,
@@ -389,6 +408,11 @@ class DedupIngressTB:
                     f"out_eop mismatch on feed {f}: got {got['out_eop'][f]} "
                     f"expected {expected['out_eop'][f]}"
                 )
+                assert got["out_byte_cnt"][f] == expected["out_byte_cnt"][f], (
+                    f"out_byte_cnt mismatch on feed {f}: got "
+                    f"{got['out_byte_cnt'][f]} "
+                    f"expected {expected['out_byte_cnt'][f]}"
+                )
 
         self.cmpl_valid = 0
         self.cmpl_seq = 0
@@ -404,7 +428,7 @@ class DedupIngressTB:
             await self.step()
 
 
-async def send_packet(tb, feed, seq, beats, seq_beat):
+async def send_packet(tb, feed, seq, beats, seq_beat, last_byte_cnt=None):
     """Stream a whole packet on one feed, returning one sample per beat.
 
     The sequence number is delivered on beat `seq_beat`, the way seq_extract
@@ -430,6 +454,7 @@ async def send_packet(tb, feed, seq, beats, seq_beat):
             data=0xA0 + i,
             sop=1 if i == 0 else 0,
             eop=1 if i == beats - 1 else 0,
+            byte_cnt=last_byte_cnt if i == beats - 1 else None,
         )
         got = await tb.step()
 

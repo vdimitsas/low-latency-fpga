@@ -33,12 +33,16 @@ module dedup_ingress #(
     input  logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq,
     input  logic [N_FEEDS-1:0]             in_seq_valid,
 
+    // byte count for the data beat
+    input  logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] in_byte_cnt,
+
     // feed outputs
     output logic [N_FEEDS-1:0]             out_valid,
     input  logic [N_FEEDS-1:0]             out_ready,
     output logic [N_FEEDS-1:0][DATA_W-1:0] out_data,
     output logic [N_FEEDS-1:0]             out_sop,
     output logic [N_FEEDS-1:0]             out_eop,
+    output logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] out_byte_cnt,
     output logic [N_FEEDS-1:0][SEQ_W-1:0]  out_seq,
     output logic [N_FEEDS-1:0]             out_seq_valid,
 
@@ -212,37 +216,25 @@ module dedup_ingress #(
     // refuse. A beat is taken when downstream has room, or when it is being
     // dropped and therefore needs no room at all.
     //
-    // The drop term keeps a feed carrying a known redundant copy from being
-    // held up by a full FIFO downstream. Those beats are discarded here and
-    // never consume a slot.
+    // drop keeps in_ready high for a beat that is being dropped. Since it's
+    // dropped in_ready has no reason to stay low for that feed
     // -------------------------------------------------------------------------
     assign in_ready = ~in_valid | out_ready | drop;
 
     // -------------------------------------------------------------------------
     // output register
     //
-    // The boundary of the block. Every output port comes from a flop here, so
-    // the path into feed_buffer starts at a register.
+    // out_ready high means downstream has taken the beat in the register, so
+    // a new beat can load and flow on. out_ready low means it has not, so the
+    // register holds. drop only goes to out_valid, since it is the slowest
+    // signal and stays off the payload enable.
     //
-    // The enable is out_ready. While downstream is closed the register holds
-    // what it has and nothing moves.
-    //
-    // drop is kept out of the payload enable on purpose. It is the slowest
-    // signal in the block, and putting it on the clock enable of the data
-    // register puts it in front of DATA_W flops per feed. It drives out_valid
-    // instead, one flop per feed. The payload loads on a dropped beat too,
-    // which nothing can see because out_valid is low for it.
-    //
-    // out_seq_valid says whether out_seq means anything on this beat. The
-    // sequence number does not arrive at SOP, so the beats ahead of it leave
-    // with a stale value on out_seq and out_seq_valid low. Downstream reads
-    // out_seq only when out_seq_valid is high.
-    //
-    // A drop can land mid packet: a copy already partly forwarded is killed the
-    // moment its seq completes, since the sequence number does not arrive until
-    // a later beat. The beats already past this block are not recalled. They
-    // are served like any others and die at DEDUP_EGRESS, which drops anything
-    // whose seq has already completed.
+    // Why out_ready and not in_ready:
+    // in_ready is ~in_valid | out_ready | drop, so it is also high for a
+    // dropped beat while downstream is closed.
+    // Loading on in_ready would then wipe a beat downstream has not taken.
+    // With out_ready the register loads only once downstream has taken its
+    // beat, and a dropped beat never gets in.
     // -------------------------------------------------------------------------
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -252,6 +244,7 @@ module dedup_ingress #(
             out_eop       <= '0;
             out_seq       <= '0;
             out_seq_valid <= '0;
+            out_byte_cnt  <= '0;
         end else begin
             for (int f = 0; f < N_FEEDS; f++) begin
                 if (out_ready[f]) begin
@@ -264,6 +257,7 @@ module dedup_ingress #(
                     out_eop[f]       <= in_eop[f];
                     out_seq[f]       <= seq_sel[f];
                     out_seq_valid[f] <= seq_sel_valid[f];
+                    out_byte_cnt[f]  <= in_byte_cnt[f];
                 end
             end
         end

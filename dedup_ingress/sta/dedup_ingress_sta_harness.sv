@@ -31,6 +31,7 @@ module dedup_ingress_sta_harness #(
     input  logic [N_FEEDS-1:0]             in_eop,
     input  logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq,
     input  logic [N_FEEDS-1:0]             in_seq_valid,
+    input  logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] in_byte_cnt,
 
     output logic [N_FEEDS-1:0]             out_valid,
     input  logic [N_FEEDS-1:0]             out_ready,
@@ -39,10 +40,13 @@ module dedup_ingress_sta_harness #(
     output logic [N_FEEDS-1:0]             out_eop,
     output logic [N_FEEDS-1:0][SEQ_W-1:0]  out_seq,
     output logic [N_FEEDS-1:0]             out_seq_valid,
+    output logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] out_byte_cnt,
 
     input  logic                           cmpl_valid,
     input  logic [SEQ_W-1:0]               cmpl_seq
 );
+
+    localparam int BYTE_CNT_W = $clog2(DATA_W/8);
 
     // -------------------------------------------------------------------------
     // input side registers
@@ -53,6 +57,7 @@ module dedup_ingress_sta_harness #(
     logic [N_FEEDS-1:0]             in_eop_q;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq_q;
     logic [N_FEEDS-1:0]             in_seq_valid_q;
+    logic [N_FEEDS-1:0][BYTE_CNT_W-1:0] in_byte_cnt_q;
     logic [N_FEEDS-1:0]             out_ready_q;
     logic                           cmpl_valid_q;
     logic [SEQ_W-1:0]               cmpl_seq_q;
@@ -65,6 +70,7 @@ module dedup_ingress_sta_harness #(
             in_eop_q       <= '0;
             in_seq_q       <= '0;
             in_seq_valid_q <= '0;
+            in_byte_cnt_q  <= '0;
             out_ready_q    <= '0;
             cmpl_valid_q   <= '0;
             cmpl_seq_q     <= '0;
@@ -75,6 +81,7 @@ module dedup_ingress_sta_harness #(
             in_eop_q       <= in_eop;
             in_seq_q       <= in_seq;
             in_seq_valid_q <= in_seq_valid;
+            in_byte_cnt_q  <= in_byte_cnt;
             out_ready_q    <= out_ready;
             cmpl_valid_q   <= cmpl_valid;
             cmpl_seq_q     <= cmpl_seq;
@@ -91,6 +98,7 @@ module dedup_ingress_sta_harness #(
     logic [N_FEEDS-1:0]             dut_out_eop;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  dut_out_seq;
     logic [N_FEEDS-1:0]             dut_out_seq_valid;
+    logic [N_FEEDS-1:0][BYTE_CNT_W-1:0] dut_out_byte_cnt;
 
     dedup_ingress #(
         .N_FEEDS    (N_FEEDS),
@@ -108,6 +116,7 @@ module dedup_ingress_sta_harness #(
         .in_eop       (in_eop_q),
         .in_seq       (in_seq_q),
         .in_seq_valid (in_seq_valid_q),
+        .in_byte_cnt  (in_byte_cnt_q),
 
         .out_valid    (dut_out_valid),
         .out_ready    (out_ready_q),
@@ -116,6 +125,7 @@ module dedup_ingress_sta_harness #(
         .out_eop      (dut_out_eop),
         .out_seq       (dut_out_seq),
         .out_seq_valid (dut_out_seq_valid),
+        .out_byte_cnt  (dut_out_byte_cnt),
 
         .cmpl_valid   (cmpl_valid_q),
         .cmpl_seq     (cmpl_seq_q)
@@ -133,6 +143,7 @@ module dedup_ingress_sta_harness #(
             out_eop       <= '0;
             out_seq       <= '0;
             out_seq_valid <= '0;
+            out_byte_cnt  <= '0;
         end else begin
             in_ready      <= dut_in_ready;
             out_valid     <= dut_out_valid;
@@ -141,6 +152,7 @@ module dedup_ingress_sta_harness #(
             out_eop       <= dut_out_eop;
             out_seq       <= dut_out_seq;
             out_seq_valid <= dut_out_seq_valid;
+            out_byte_cnt  <= dut_out_byte_cnt;
         end
     end
 

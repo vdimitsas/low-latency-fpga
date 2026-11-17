@@ -67,11 +67,13 @@ business, and this block never looks at `in_data`.
 | `in_eop` | in | `N_FEEDS` | Last beat of a packet, per feed. |
 | `in_seq` | in | `N_FEEDS` x `SEQ_W` | Sequence ID from `seq_extract`, per feed. |
 | `in_seq_valid` | in | `N_FEEDS` | High on the beat carrying the sequence ID, per feed. |
+| `in_byte_cnt` | in | `N_FEEDS` x `$clog2(DATA_W/8)` | Index of the last valid byte in the beat, per feed. |
 | `out_valid` | out | `N_FEEDS` | Beat valid downstream. Low when the copy is dropped. |
 | `out_ready` | in | `N_FEEDS` | Downstream has room, per feed. |
 | `out_data` | out | `N_FEEDS` x `DATA_W` | Beat data, unchanged. |
 | `out_sop` | out | `N_FEEDS` | First beat marker, unchanged. |
 | `out_eop` | out | `N_FEEDS` | Last beat marker, unchanged. |
+| `out_byte_cnt` | out | `N_FEEDS` x `$clog2(DATA_W/8)` | Byte count, unchanged. |
 | `out_seq` | out | `N_FEEDS` x `SEQ_W` | Sequence ID of the packet on that feed. |
 | `out_seq_valid` | out | `N_FEEDS` | High once the sequence ID has arrived on this packet. |
 | `cmpl_valid` | in | 1 | A packet has been confirmed by CHECKSUM. |
@@ -80,7 +82,7 @@ business, and this block never looks at `in_data`.
 Each feed is an independent stream with its own handshake. There is no shared
 port and no arbitration.
 
-`in_data` is registered and forwarded. Nothing here reads it.
+`in_data` and `in_byte_cnt` are registered and forwarded.
 
 `out_seq` is carried forward so no block downstream has to parse the header
 again. `out_seq_valid` says whether it means anything on this beat: the beats
@@ -177,9 +179,9 @@ The payload loads on a dropped beat too, which nothing can see.
 
 ### One cycle datapath
 
-One register between input and output. `out_data`, `out_sop` and `out_eop` are
-the registered input signals, unchanged. A beat presented on `in_data[f]`
-appears on `out_data[f]` one cycle later.
+One register between input and output. `out_data`, `out_sop`, `out_eop` and
+`out_byte_cnt` are the registered input signals, unchanged. A beat presented
+on `in_data[f]` appears on `out_data[f]` one cycle later.
 
 The only thing this block does to the stream is withhold `out_valid[f]` when
 that feed's copy is being dropped. A drop is not a special output state:

@@ -26,6 +26,7 @@ module dedup_ingress_tb_wrap #(
     input  logic [N_FEEDS-1:0]            in_eop,
     input  logic [N_FEEDS*SEQ_W-1:0]      in_seq_flat,
     input  logic [N_FEEDS-1:0]            in_seq_valid,
+    input  logic [N_FEEDS*$clog2(DATA_W/8)-1:0] in_byte_cnt_flat,
 
     output logic [N_FEEDS-1:0]            out_valid,
     input  logic [N_FEEDS-1:0]            out_ready,
@@ -34,27 +35,34 @@ module dedup_ingress_tb_wrap #(
     output logic [N_FEEDS-1:0]            out_eop,
     output logic [N_FEEDS*SEQ_W-1:0]      out_seq_flat,
     output logic [N_FEEDS-1:0]            out_seq_valid,
+    output logic [N_FEEDS*$clog2(DATA_W/8)-1:0] out_byte_cnt_flat,
 
     input  logic                          cmpl_valid,
     input  logic [SEQ_W-1:0]              cmpl_seq
 );
 
+    localparam int BYTE_CNT_W = $clog2(DATA_W/8);
+
     logic [N_FEEDS-1:0][DATA_W-1:0] in_data;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq;
     logic [N_FEEDS-1:0][DATA_W-1:0] out_data;
     logic [N_FEEDS-1:0][SEQ_W-1:0]  out_seq;
+    logic [N_FEEDS-1:0][BYTE_CNT_W-1:0] in_byte_cnt;
+    logic [N_FEEDS-1:0][BYTE_CNT_W-1:0] out_byte_cnt;
 
     always_comb begin
         for (int f = 0; f < N_FEEDS; f++) begin
             in_data[f] = in_data_flat[f*DATA_W +: DATA_W];
             in_seq[f]  = in_seq_flat[f*SEQ_W  +: SEQ_W];
+            in_byte_cnt[f] = in_byte_cnt_flat[f*BYTE_CNT_W +: BYTE_CNT_W];
         end
     end
 
     always_comb begin
         for (int f = 0; f < N_FEEDS; f++) begin
-            out_data_flat[f*DATA_W +: DATA_W] = out_data[f];
-            out_seq_flat[f*SEQ_W  +: SEQ_W]   = out_seq[f];
+            out_data_flat[f*DATA_W +: DATA_W]              = out_data[f];
+            out_seq_flat[f*SEQ_W  +: SEQ_W]                = out_seq[f];
+            out_byte_cnt_flat[f*BYTE_CNT_W  +: BYTE_CNT_W] = out_byte_cnt[f];
         end
     end
 
@@ -74,6 +82,7 @@ module dedup_ingress_tb_wrap #(
         .in_eop       (in_eop),
         .in_seq       (in_seq),
         .in_seq_valid (in_seq_valid),
+        .in_byte_cnt  (in_byte_cnt),
 
         .out_valid    (out_valid),
         .out_ready    (out_ready),
@@ -82,6 +91,7 @@ module dedup_ingress_tb_wrap #(
         .out_eop      (out_eop),
         .out_seq       (out_seq),
         .out_seq_valid (out_seq_valid),
+        .out_byte_cnt  (out_byte_cnt),
 
         .cmpl_valid   (cmpl_valid),
         .cmpl_seq     (cmpl_seq)
