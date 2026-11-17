@@ -28,19 +28,25 @@ module dedup_egress_sta_harness #(
     output logic              in_ready,
     input  logic [DATA_W-1:0] in_data,
     input  logic [SEQ_W-1:0]  in_seq,
+    input  logic              in_seq_valid,
     input  logic              in_sop,
     input  logic              in_eop,
+    input  logic [$clog2(DATA_W/8)-1:0] in_byte_cnt,
 
     output logic              out_valid,
     input  logic              out_ready,
     output logic [DATA_W-1:0] out_data,
     output logic [SEQ_W-1:0]  out_seq,
+    output logic              out_seq_valid,
     output logic              out_sop,
     output logic              out_eop,
+    output logic [$clog2(DATA_W/8)-1:0] out_byte_cnt,
 
     input  logic              cmpl_valid,
     input  logic [SEQ_W-1:0]  cmpl_seq
 );
+
+    localparam int BYTE_CNT_W = $clog2(DATA_W/8);
 
     // -------------------------------------------------------------------------
     // input side registers
@@ -50,6 +56,8 @@ module dedup_egress_sta_harness #(
     logic [SEQ_W-1:0]  in_seq_q;
     logic              in_sop_q;
     logic              in_eop_q;
+    logic              in_seq_valid_q;
+    logic [BYTE_CNT_W-1:0] in_byte_cnt_q;
     logic              out_ready_q;
     logic              cmpl_valid_q;
     logic [SEQ_W-1:0]  cmpl_seq_q;
@@ -61,6 +69,8 @@ module dedup_egress_sta_harness #(
             in_seq_q     <= '0;
             in_sop_q     <= '0;
             in_eop_q     <= '0;
+            in_seq_valid_q <= '0;
+            in_byte_cnt_q  <= '0;
             out_ready_q  <= '0;
             cmpl_valid_q <= '0;
             cmpl_seq_q   <= '0;
@@ -70,6 +80,8 @@ module dedup_egress_sta_harness #(
             in_seq_q     <= in_seq;
             in_sop_q     <= in_sop;
             in_eop_q     <= in_eop;
+            in_seq_valid_q <= in_seq_valid;
+            in_byte_cnt_q  <= in_byte_cnt;
             out_ready_q  <= out_ready;
             cmpl_valid_q <= cmpl_valid;
             cmpl_seq_q   <= cmpl_seq;
@@ -85,6 +97,8 @@ module dedup_egress_sta_harness #(
     logic [SEQ_W-1:0]  dut_out_seq;
     logic              dut_out_sop;
     logic              dut_out_eop;
+    logic              dut_out_seq_valid;
+    logic [BYTE_CNT_W-1:0] dut_out_byte_cnt;
 
     dedup_egress #(
         .DATA_W    (DATA_W),
@@ -100,6 +114,8 @@ module dedup_egress_sta_harness #(
         .in_seq     (in_seq_q),
         .in_sop     (in_sop_q),
         .in_eop     (in_eop_q),
+        .in_seq_valid (in_seq_valid_q),
+        .in_byte_cnt  (in_byte_cnt_q),
 
         .out_valid  (dut_out_valid),
         .out_ready  (out_ready_q),
@@ -107,6 +123,8 @@ module dedup_egress_sta_harness #(
         .out_seq    (dut_out_seq),
         .out_sop    (dut_out_sop),
         .out_eop    (dut_out_eop),
+        .out_seq_valid (dut_out_seq_valid),
+        .out_byte_cnt  (dut_out_byte_cnt),
 
         .cmpl_valid (cmpl_valid_q),
         .cmpl_seq   (cmpl_seq_q)
@@ -123,6 +141,8 @@ module dedup_egress_sta_harness #(
             out_seq   <= '0;
             out_sop   <= '0;
             out_eop   <= '0;
+            out_seq_valid <= '0;
+            out_byte_cnt  <= '0;
         end else begin
             in_ready  <= dut_in_ready;
             out_valid <= dut_out_valid;
@@ -130,6 +150,8 @@ module dedup_egress_sta_harness #(
             out_seq   <= dut_out_seq;
             out_sop   <= dut_out_sop;
             out_eop   <= dut_out_eop;
+            out_seq_valid <= dut_out_seq_valid;
+            out_byte_cnt  <= dut_out_byte_cnt;
         end
     end
 

@@ -14,8 +14,8 @@ is wired together.
 |---|---|---|
 | `seq_extract` | Implemented, verified, timing closed | +1.258 ns |
 | `dedup_ingress` | Implemented, verified, timing closed | +0.122 ns |
-| `feed_buffer` | Implemented, verified, timing closed | +0.688 ns |
-| `market_line_arbiter` | Implemented, verified, timing closed | +0.298 ns |
+| `feed_buffer` | Implemented, verified, timing closed | +0.687 ns |
+| `market_line_arbiter` | Implemented, verified, timing closed | +0.416 ns |
 | `dedup_egress` | Implemented, verified, timing closed | +0.257 ns |
 | `checksum` | Planned | |
 | `fix_tracker` | Planned | |

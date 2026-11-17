@@ -18,7 +18,7 @@ import random
 
 import cocotb
 
-from dedup_egress_common import DedupEgressTB
+from dedup_egress_common import BYTE_CNT_MAX, DedupEgressTB
 
 CYCLES = 3000
 SEQ_POOL = 64
@@ -55,11 +55,14 @@ async def test_constrained_random(dut):
                 st.remaining = rnd.randint(1, 6)
                 st.in_packet = True
                 seen.append(st.seq)
+                first_is_last = st.remaining == 1
                 tb.present(
                     seq=st.seq,
                     data=rnd.getrandbits(16),
                     sop=1,
-                    eop=1 if st.remaining == 1 else 0,
+                    eop=1 if first_is_last else 0,
+                    seq_valid=rnd.randint(0, 1),
+                    byte_cnt=rnd.randint(0, BYTE_CNT_MAX) if first_is_last else None,
                 )
                 st.remaining -= 1
                 if st.remaining == 0:
@@ -71,6 +74,8 @@ async def test_constrained_random(dut):
                 data=rnd.getrandbits(16),
                 sop=0,
                 eop=1 if last else 0,
+                seq_valid=rnd.randint(0, 1),
+                byte_cnt=rnd.randint(0, BYTE_CNT_MAX) if last else None,
             )
             st.remaining -= 1
             if last:

@@ -44,7 +44,8 @@ import random
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ClockCycles, Timer, ReadOnly
-from arb_common import NUM_FEEDS, HICCUP_CYCLES, DATA_W, SEQ_W, FULL
+from arb_common import (NUM_FEEDS, HICCUP_CYCLES, DATA_W, SEQ_W, FULL,
+                        BYTE_CNT_W, BYTE_CNT_MAX)
 
 ARM_CNT = HICCUP_CYCLES - 3
 
@@ -71,6 +72,8 @@ class Stim:
         self.feed_eop   = 0
         self.feed_data  = [0] * NUM_FEEDS
         self.feed_seq   = [0] * NUM_FEEDS
+        self.feed_seq_valid = 0
+        self.feed_byte_cnt  = [BYTE_CNT_MAX] * NUM_FEEDS
         self.out_ready  = 1
         self.fix_avail  = 0
 
@@ -86,6 +89,9 @@ class Stim:
                 s.feed_eop |= (1 << i)
             s.feed_data[i] = random.randint(0, (1 << DATA_W) - 1)
             s.feed_seq[i]  = random.randint(0, (1 << SEQ_W) - 1)
+            if random.random() < 0.5:
+                s.feed_seq_valid |= (1 << i)
+            s.feed_byte_cnt[i] = random.randint(0, BYTE_CNT_MAX)
             if random.random() < 0.25:
                 s.fix_avail |= (1 << i)
         s.out_ready = 1 if random.random() < 0.7 else 0
@@ -104,6 +110,11 @@ def drive(dut, s):
         sflat |= (s.feed_seq[i]  & ((1 << SEQ_W) - 1))  << (i * SEQ_W)
     dut.feed_data_flat.value = dflat
     dut.feed_seq_flat.value  = sflat
+    dut.feed_seq_valid.value = s.feed_seq_valid
+    bflat = 0
+    for i in range(NUM_FEEDS):
+        bflat |= (s.feed_byte_cnt[i] & ((1 << BYTE_CNT_W) - 1)) << (i * BYTE_CNT_W)
+    dut.feed_byte_cnt_flat.value = bflat
 
 
 # ---------------------------------------------------------------
@@ -117,11 +128,15 @@ class Golden:
         self.serve_eop_q   = 0
         self.serve_seq_q   = 0
         self.serve_data_q  = 0
+        self.serve_seq_valid_q = 0
+        self.serve_byte_cnt_q  = 0
         self.skid_valid = 0
         self.skid_data  = [0] * NUM_FEEDS
         self.skid_sop   = 0
         self.skid_eop   = 0
         self.skid_seq   = [0] * NUM_FEEDS
+        self.skid_seq_valid = 0
+        self.skid_byte_cnt  = [0] * NUM_FEEDS
         self.hiccup_cnt      = 0
         self.invalidate_q      = 0   # per-feed, one-hot when armed
         self.invalidate_feed_q = 0   # per-feed, faithful 1-cycle delay
@@ -135,6 +150,8 @@ class Golden:
         eff_eop   = [0] * NF
         eff_seq   = [0] * NF
         eff_data  = [0] * NF
+        eff_seq_valid = [0] * NF
+        eff_byte_cnt  = [0] * NF
         for i in range(NF):
             if bit(self.skid_valid, i):
                 eff_valid[i] = 1
@@ -142,12 +159,16 @@ class Golden:
                 eff_eop[i]   = bit(self.skid_eop, i)
                 eff_seq[i]   = self.skid_seq[i]
                 eff_data[i]  = self.skid_data[i]
+                eff_seq_valid[i] = bit(self.skid_seq_valid, i)
+                eff_byte_cnt[i]  = self.skid_byte_cnt[i]
             else:
                 eff_valid[i] = bit(s.feed_valid, i)
                 eff_sop[i]   = bit(s.feed_sop, i)
                 eff_eop[i]   = bit(s.feed_eop, i)
                 eff_seq[i]   = s.feed_seq[i]
                 eff_data[i]  = s.feed_data[i]
+                eff_seq_valid[i] = bit(s.feed_seq_valid, i)
+                eff_byte_cnt[i]  = s.feed_byte_cnt[i]
 
         # ---- serve_mux ----
         confirmed_dead = 0
@@ -181,10 +202,14 @@ class Golden:
                             for i in range(NF))) else 0
         serve_seq_c  = 0
         serve_data_c = 0
+        serve_seq_valid_c = 0
+        serve_byte_cnt_c  = 0
         for i in range(NF):
             if bit(serve_feed, i):
                 serve_seq_c  = eff_seq[i]
                 serve_data_c = eff_data[i]
+                serve_seq_valid_c = eff_seq_valid[i]
+                serve_byte_cnt_c  = eff_byte_cnt[i]
 
         # ---- in_ready (combinational, current skid_valid, live
         #      serve_feed/out_ready) ----
@@ -201,6 +226,8 @@ class Golden:
         skid_sop_nxt   = self.skid_sop
         skid_eop_nxt   = self.skid_eop
         skid_seq_nxt   = list(self.skid_seq)
+        skid_seq_valid_nxt = self.skid_seq_valid
+        skid_byte_cnt_nxt  = list(self.skid_byte_cnt)
 
         for i in range(NF):
             occupied   = bit(self.skid_valid, i)
@@ -218,6 +245,11 @@ class Golden:
                         else:
                             skid_eop_nxt &= ~(1 << i)
                         skid_seq_nxt[i] = s.feed_seq[i]
+                        if bit(s.feed_seq_valid, i):
+                            skid_seq_valid_nxt |= (1 << i)
+                        else:
+                            skid_seq_valid_nxt &= ~(1 << i)
+                        skid_byte_cnt_nxt[i] = s.feed_byte_cnt[i]
                     else:
                         skid_valid_nxt &= ~(1 << i)
                 # else: occupied, not served -> hold (default)
@@ -234,6 +266,11 @@ class Golden:
                     else:
                         skid_eop_nxt &= ~(1 << i)
                     skid_seq_nxt[i] = s.feed_seq[i]
+                    if bit(s.feed_seq_valid, i):
+                        skid_seq_valid_nxt |= (1 << i)
+                    else:
+                        skid_seq_valid_nxt &= ~(1 << i)
+                    skid_byte_cnt_nxt[i] = s.feed_byte_cnt[i]
 
         skid_valid_nxt &= FULL
         skid_sop_nxt   &= FULL
@@ -281,6 +318,8 @@ class Golden:
         out_valid = self.serve_valid_q
         out_data  = self.serve_data_q
         out_seq   = self.serve_seq_q
+        out_seq_valid = self.serve_seq_valid_q
+        out_byte_cnt  = self.serve_byte_cnt_q
         out_sop   = self.serve_sop_q
         out_eop   = self.serve_eop_q
         out_feed  = encode(self.serve_feed_q)
@@ -297,9 +336,13 @@ class Golden:
             serve_eop_q   = 1 if (serve_eop_c and s.out_ready) else 0,
             serve_seq_q   = serve_seq_c,
             serve_data_q  = serve_data_c,
+            serve_seq_valid_q = serve_seq_valid_c,
+            serve_byte_cnt_q  = serve_byte_cnt_c,
             skid_valid = skid_valid_nxt, skid_data = skid_data_nxt,
             skid_sop = skid_sop_nxt, skid_eop = skid_eop_nxt,
             skid_seq = skid_seq_nxt,
+            skid_seq_valid = skid_seq_valid_nxt,
+            skid_byte_cnt = skid_byte_cnt_nxt,
             hiccup_cnt = hiccup_cnt_committed,
             invalidate_q = invalidate_q_nxt,
             invalidate_feed_q = invalidate_feed_q_nxt,
@@ -308,6 +351,7 @@ class Golden:
         return dict(
             in_ready=in_ready, invalidate_feed=invalidate_feed,
             out_valid=out_valid, out_data=out_data, out_seq=out_seq,
+            out_seq_valid=out_seq_valid, out_byte_cnt=out_byte_cnt,
             out_sop=out_sop, out_eop=out_eop, out_feed=out_feed,
             fix_served_valid=fix_served_valid,
             fix_served_feed=fix_served_feed,
@@ -321,11 +365,15 @@ class Golden:
         self.serve_eop_q   = n['serve_eop_q']
         self.serve_seq_q   = n['serve_seq_q']
         self.serve_data_q  = n['serve_data_q']
+        self.serve_seq_valid_q = n['serve_seq_valid_q']
+        self.serve_byte_cnt_q  = n['serve_byte_cnt_q']
         self.skid_valid = n['skid_valid']
         self.skid_data  = n['skid_data']
         self.skid_sop   = n['skid_sop']
         self.skid_eop   = n['skid_eop']
         self.skid_seq   = n['skid_seq']
+        self.skid_seq_valid = n['skid_seq_valid']
+        self.skid_byte_cnt  = n['skid_byte_cnt']
         self.hiccup_cnt = n['hiccup_cnt']
         self.invalidate_q      = n['invalidate_q']
         self.invalidate_feed_q = n['invalidate_feed_q']
@@ -365,6 +413,8 @@ async def test_random_full_golden(dut):
             out_valid=int(dut.out_valid.value),
             out_data=int(dut.out_data.value),
             out_seq=int(dut.out_seq.value),
+            out_seq_valid=int(dut.out_seq_valid.value),
+            out_byte_cnt=int(dut.out_byte_cnt.value),
             out_sop=int(dut.out_sop.value),
             out_eop=int(dut.out_eop.value),
             out_feed=int(dut.out_feed.value),
@@ -375,7 +425,7 @@ async def test_random_full_golden(dut):
         keys = ["in_ready", "invalidate_feed", "fix_served_valid"]
         if exp["out_valid"]:
             keys += ["out_valid", "out_data", "out_seq", "out_sop",
-                     "out_eop", "out_feed"]
+                     "out_eop", "out_feed", "out_seq_valid", "out_byte_cnt"]
         else:
             keys += ["out_valid"]
         if exp["fix_served_valid"]:

@@ -28,16 +28,20 @@ module feed_buffer #(
     output logic [N_FEEDS-1:0]             in_ready,
     input  logic [N_FEEDS-1:0][DATA_W-1:0] in_data,
     input  logic [N_FEEDS-1:0][SEQ_W-1:0]  in_seq,
+    input  logic [N_FEEDS-1:0]             in_seq_valid,
     input  logic [N_FEEDS-1:0]             in_sop,
     input  logic [N_FEEDS-1:0]             in_eop,
+    input  logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] in_byte_cnt,
 
     // to MARKET_LINE_ARBITER
     output logic [N_FEEDS-1:0]             out_valid,
     input  logic [N_FEEDS-1:0]             out_ready,
     output logic [N_FEEDS-1:0][DATA_W-1:0] out_data,
     output logic [N_FEEDS-1:0][SEQ_W-1:0]  out_seq,
+    output logic [N_FEEDS-1:0]             out_seq_valid,
     output logic [N_FEEDS-1:0]             out_sop,
     output logic [N_FEEDS-1:0]             out_eop,
+    output logic [N_FEEDS-1:0][$clog2(DATA_W/8)-1:0] out_byte_cnt,
 
     // from MARKET_LINE_ARBITER
     input  logic [N_FEEDS-1:0]             invalidate_feed
@@ -52,11 +56,15 @@ module feed_buffer #(
             $error("feed_buffer: FIFO_DEPTH must be a power of two");
     end
 
+    localparam int BYTE_CNT_W = $clog2(DATA_W/8);
+
     typedef struct packed {
-        logic [DATA_W-1:0] data;
-        logic [SEQ_W-1:0]  seq;
-        logic              sop;
-        logic              eop;
+        logic [DATA_W-1:0]     data;
+        logic [SEQ_W-1:0]      seq;
+        logic                  seq_valid;
+        logic                  sop;
+        logic                  eop;
+        logic [BYTE_CNT_W-1:0] byte_cnt;
     } beat_t;
 
     localparam int BEAT_W = $bits(beat_t);
@@ -69,10 +77,12 @@ module feed_buffer #(
         for (genvar f = 0; f < N_FEEDS; f++) begin : g_feed
 
             beat_t in_beat;
-            assign in_beat.data = in_data[f];
-            assign in_beat.seq  = in_seq[f];
-            assign in_beat.sop  = in_sop[f];
-            assign in_beat.eop  = in_eop[f];
+            assign in_beat.data      = in_data[f];
+            assign in_beat.seq       = in_seq[f];
+            assign in_beat.seq_valid = in_seq_valid[f];
+            assign in_beat.sop       = in_sop[f];
+            assign in_beat.eop       = in_eop[f];
+            assign in_beat.byte_cnt  = in_byte_cnt[f];
 
             // -----------------------------------------------------------------
             // sticky invalidate
@@ -183,11 +193,13 @@ module feed_buffer #(
                 end
             end
 
-            assign out_valid[f] = out_reg_valid[f];
-            assign out_data[f]  = out_reg[f].data;
-            assign out_seq[f]   = out_reg[f].seq;
-            assign out_sop[f]   = out_reg[f].sop;
-            assign out_eop[f]   = out_reg[f].eop;
+            assign out_valid[f]     = out_reg_valid[f];
+            assign out_data[f]      = out_reg[f].data;
+            assign out_seq[f]       = out_reg[f].seq;
+            assign out_seq_valid[f] = out_reg[f].seq_valid;
+            assign out_sop[f]       = out_reg[f].sop;
+            assign out_eop[f]       = out_reg[f].eop;
+            assign out_byte_cnt[f]  = out_reg[f].byte_cnt;
 
         end
     endgenerate

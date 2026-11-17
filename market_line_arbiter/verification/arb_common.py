@@ -12,6 +12,10 @@ DATA_W        = 64
 SEQ_W         = 32
 FULL          = (1 << NUM_FEEDS) - 1
 
+BYTES_PER_BEAT = DATA_W // 8
+BYTE_CNT_W     = (BYTES_PER_BEAT - 1).bit_length()
+BYTE_CNT_MAX   = BYTES_PER_BEAT - 1
+
 # Shared packet-length constants — reference these, never a bare
 # literal, so packet size is changed in exactly one place.
 PKT_LEN_LONG   = 4   # multi-chunk packet used for basic serving checks
@@ -28,6 +32,8 @@ async def reset_dut(dut):
     dut.feed_eop.value       = 0
     dut.feed_data_flat.value = 0
     dut.feed_seq_flat.value  = 0
+    dut.feed_seq_valid.value = 0
+    dut.feed_byte_cnt_flat.value = 0
     dut.out_ready.value      = 1
     dut.fix_avail.value      = 0
     await ClockCycles(dut.clk, 3)
@@ -36,13 +42,23 @@ async def reset_dut(dut):
 
 
 def drive_feeds(dut, *, valid=0, sop=0, eop=0, data=None, seq=None,
-                out_ready=1, fix_avail=0):
-    """Drive all inputs in one call. data/seq are per-feed lists."""
+                out_ready=1, fix_avail=0, seq_valid=0, byte_cnt=None):
+    """Drive all inputs in one call. data/seq/byte_cnt are per-feed lists.
+    byte_cnt defaults to a full beat on every feed."""
     dut.feed_valid.value = valid
     dut.feed_sop.value   = sop
     dut.feed_eop.value   = eop
+    dut.feed_seq_valid.value = seq_valid
     dut.out_ready.value  = out_ready
     dut.fix_avail.value  = fix_avail
+    bflat = 0
+    for i in range(NUM_FEEDS):
+        if byte_cnt:
+            b = byte_cnt[i]
+        else:
+            b = BYTE_CNT_MAX
+        bflat |= (b & ((1 << BYTE_CNT_W) - 1)) << (i * BYTE_CNT_W)
+    dut.feed_byte_cnt_flat.value = bflat
     dflat, sflat = 0, 0
     for i in range(NUM_FEEDS):
         d = data[i] if data else 0

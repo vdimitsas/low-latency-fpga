@@ -54,14 +54,18 @@ alongside `N_FEEDS` being at least one and `FIFO_DEPTH` at least two.
 | `in_ready` | out | `N_FEEDS` | Per feed. |
 | `in_data` | in | `N_FEEDS` x `DATA_W` | |
 | `in_seq` | in | `N_FEEDS` x `SEQ_W` | |
+| `in_seq_valid` | in | `N_FEEDS` | |
 | `in_sop` | in | `N_FEEDS` | Start of packet. |
 | `in_eop` | in | `N_FEEDS` | End of packet. |
+| `in_byte_cnt` | in | `N_FEEDS` x `$clog2(DATA_W/8)` | Index of the last valid byte in the beat. |
 | `out_valid` | out | `N_FEEDS` | Per feed. |
 | `out_ready` | in | `N_FEEDS` | Per feed, from the arbiter. |
 | `out_data` | out | `N_FEEDS` x `DATA_W` | |
 | `out_seq` | out | `N_FEEDS` x `SEQ_W` | |
+| `out_seq_valid` | out | `N_FEEDS` | |
 | `out_sop` | out | `N_FEEDS` | |
 | `out_eop` | out | `N_FEEDS` | |
+| `out_byte_cnt` | out | `N_FEEDS` x `$clog2(DATA_W/8)` | |
 | `invalidate_feed` | in | `N_FEEDS` | From the arbiter, one bit per feed. |
 
 ### Handshake
@@ -97,25 +101,27 @@ between them except the clock and reset, which is what keeps feeds independent.
 
 ![one slice](images/feed_buffer_slice.svg)
 
-`in_beat` is the four input fields packed into one value. It goes two places:
+`in_beat` is the six input fields packed into one value. It goes two places:
 the FIFO write port, and the bypass leg of the mux. Only one of the two is taken
 in any cycle.
 
 ### `beat_t`
 
-The four fields are packed into a struct so the FIFO stores one value rather
-than four:
+The six fields are packed into a struct so the FIFO stores one value rather
+than six:
 
 ```systemverilog
 typedef struct packed {
-    logic [DATA_W-1:0] data;
-    logic [SEQ_W-1:0]  seq;
-    logic              sop;
-    logic              eop;
+    logic [DATA_W-1:0]     data;
+    logic [SEQ_W-1:0]      seq;
+    logic                  seq_valid;
+    logic                  sop;
+    logic                  eop;
+    logic [BYTE_CNT_W-1:0] byte_cnt;
 } beat_t;
 ```
 
-At the defaults that is 98 bits. The width is taken as `$bits(beat_t)` rather
+At the defaults that is 102 bits. The width is taken as `$bits(beat_t)` rather
 than written out, so adding a field cannot leave the FIFO width behind.
 
 The struct is declared inside `feed_buffer` and does not leave it. The ports
@@ -132,7 +138,7 @@ write port, a read port. It knows nothing about beats or feeds. It exposes
 that cycle. That is what makes the stored path two cycles rather than three.
 
 The storage is an array indexed by a register, so Vivado maps it to distributed
-RAM. At the defaults that is 98 bits by 32 entries by 4 feeds.
+RAM. At the defaults that is 102 bits by 32 entries by 4 feeds.
 
 There is no flush port. Section 5 covers why none is needed.
 
@@ -288,7 +294,7 @@ write side.
 
 ### The beat is a struct, and it stays local
 
-Packing the four fields into `beat_t` means the FIFO stores and returns one
+Packing the six fields into `beat_t` means the FIFO stores and returns one
 value. The width is `$bits(beat_t)`, so adding a field cannot leave the FIFO
 behind.
 
@@ -320,12 +326,12 @@ as the silence lasts.
 Synthesised for Xilinx Kintex-7 `xc7k160tffg676-3` at 325 MHz, a 3.077 ns
 period.
 
-**WNS +0.688 ns** post synthesis.
+**WNS +0.687 ns** post synthesis.
 
 ```
 Source:       g_feed[3].u_fifo/wr_ptr_reg[1]/C
 Destination:  g_feed[3].u_fifo/mem_reg_0_31_0_5/RAMA/WE
-Data Path Delay: 1.920 ns  (logic 0.431 ns, route 1.489 ns)
+Data Path Delay: 1.921 ns  (logic 0.431 ns, route 1.490 ns)
 ```
 
 The path runs from a FIFO write pointer bit, through the comparison that
@@ -333,7 +339,7 @@ produces `full`, through `in_ready` and the bypass decision, to the FIFO write
 enable. Which feed it lands on is placement, not structure: all `N_FEEDS` slices
 are identical and any of them can be the worst.
 
-Only 0.431 ns is logic. The other 1.489 ns is routing into the distributed RAM,
+Only 0.431 ns is logic. The other 1.490 ns is routing into the distributed RAM,
 which is where the block spends most of its budget.
 
 Adding `out_reg_free` to `in_ready`, which is what removes the bubble described
@@ -353,7 +359,7 @@ Depth sets the pointer width, so doubling it adds a bit to the comparison that
 produces `full`, which sits on the worst path. It also grows the distributed
 RAM, which is where the routing delay already goes.
 
-At depth 32 there is 0.688 ns of margin, so there is room. The thing to watch is
+At depth 32 there is 0.687 ns of margin, so there is room. The thing to watch is
 not the logic but the RAM: past a certain size Vivado moves the storage into
 block RAM, and block RAM has a registered read port. That would break the
 combinational `rd_data` this design depends on, and the read path would cost an

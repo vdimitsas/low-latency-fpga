@@ -31,16 +31,20 @@ module dedup_egress #(
     output logic              in_ready,
     input  logic [DATA_W-1:0] in_data,
     input  logic [SEQ_W-1:0]  in_seq,
+    input  logic              in_seq_valid,
     input  logic              in_sop,
     input  logic              in_eop,
+    input  logic [$clog2(DATA_W/8)-1:0] in_byte_cnt,
 
     // output stream
     output logic              out_valid,
     input  logic              out_ready,
     output logic [DATA_W-1:0] out_data,
     output logic [SEQ_W-1:0]  out_seq,
+    output logic              out_seq_valid,
     output logic              out_sop,
     output logic              out_eop,
+    output logic [$clog2(DATA_W/8)-1:0] out_byte_cnt,
 
     // completion feedback from CHECKSUM
     input  logic              cmpl_valid,
@@ -56,6 +60,7 @@ module dedup_egress #(
     end
 
     localparam int CPT_PTR_W = (CPT_DEPTH == 1) ? 1 : $clog2(CPT_DEPTH);
+    localparam int BYTE_CNT_W = $clog2(DATA_W/8);
 
     // -------------------------------------------------------------------------
     // completed packets table
@@ -146,6 +151,8 @@ module dedup_egress #(
     logic                 sop_q;
     logic                 eop_q;
     logic [SEQ_W-1:0]     seq_q;
+    logic                 seq_valid_q;
+    logic [BYTE_CNT_W-1:0] byte_cnt_q;
     logic [CPT_DEPTH-1:0] cpt_match_q;
     logic                 bypass_match_q;
 
@@ -156,6 +163,8 @@ module dedup_egress #(
             sop_q          <= 1'b0;
             eop_q          <= 1'b0;
             seq_q          <= '0;
+            seq_valid_q    <= 1'b0;
+            byte_cnt_q     <= '0;
             cpt_match_q    <= '0;
             bypass_match_q <= 1'b0;
         end else begin
@@ -168,6 +177,8 @@ module dedup_egress #(
                 sop_q          <= in_sop;
                 eop_q          <= in_eop;
                 seq_q          <= in_seq;
+                seq_valid_q    <= in_seq_valid;
+                byte_cnt_q     <= in_byte_cnt;
                 cpt_match_q    <= cpt_match;
                 bypass_match_q <= bypass_match;
             end
@@ -214,6 +225,8 @@ module dedup_egress #(
         out_sop   = sop_q;
         out_eop   = eop_q;
         out_seq   = seq_q;
+        out_seq_valid = seq_valid_q;
+        out_byte_cnt  = byte_cnt_q;
     end
 
 endmodule

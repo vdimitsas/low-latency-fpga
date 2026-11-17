@@ -13,6 +13,8 @@ module market_line_arbiter #(
     input  logic [NUM_FEEDS-1:0] feed_eop,
     input  logic [DATA_W-1:0]    feed_data [NUM_FEEDS],
     input  logic [SEQ_W-1:0]     feed_seq  [NUM_FEEDS],
+    input  logic [NUM_FEEDS-1:0] feed_seq_valid,
+    input  logic [$clog2(DATA_W/8)-1:0] feed_byte_cnt [NUM_FEEDS],
     input  logic                 out_ready,
     input  logic [NUM_FEEDS-1:0] fix_avail,
     output logic [NUM_FEEDS-1:0] in_ready,
@@ -20,14 +22,17 @@ module market_line_arbiter #(
     output logic                 out_valid,
     output logic [DATA_W-1:0]    out_data,
     output logic [SEQ_W-1:0]     out_seq,
+    output logic                 out_seq_valid,
     output logic                 out_sop,
     output logic                 out_eop,
+    output logic [$clog2(DATA_W/8)-1:0] out_byte_cnt,
     output logic [FEED_ID_W-1:0] out_feed,
     output logic [FEED_ID_W-1:0] fix_served_feed,
     output logic                 fix_served_valid
 );
 
 localparam logic [HICCUP_W-1:0] ARM_CNT = HICCUP_W'(HICCUP_CYCLES - 3);
+localparam int BYTE_CNT_W = $clog2(DATA_W/8);
 
 // synthesis translate_off
 initial begin
@@ -46,10 +51,14 @@ logic serve_sop_c,   serve_eop_c,   serve_valid_c;
 logic serve_sop_q,   serve_eop_q,   serve_valid_q;
 logic [SEQ_W-1:0]  serve_seq_c,  serve_seq_q;
 logic [DATA_W-1:0] serve_data_c, serve_data_q;
+logic              serve_seq_valid_c, serve_seq_valid_q;
+logic [BYTE_CNT_W-1:0] serve_byte_cnt_c, serve_byte_cnt_q;
 
 logic [NUM_FEEDS-1:0] eff_valid, eff_sop, eff_eop;
 logic [SEQ_W-1:0]     eff_seq  [NUM_FEEDS];
 logic [DATA_W-1:0]    eff_data [NUM_FEEDS];
+logic [NUM_FEEDS-1:0] eff_seq_valid;
+logic [BYTE_CNT_W-1:0] eff_byte_cnt [NUM_FEEDS];
 
 logic [NUM_FEEDS-1:0] skid_valid,     skid_valid_nxt;
 logic [DATA_W-1:0]    skid_data      [NUM_FEEDS];
@@ -58,6 +67,9 @@ logic [NUM_FEEDS-1:0] skid_sop,       skid_sop_nxt;
 logic [NUM_FEEDS-1:0] skid_eop,       skid_eop_nxt;
 logic [SEQ_W-1:0]     skid_seq       [NUM_FEEDS];
 logic [SEQ_W-1:0]     skid_seq_nxt   [NUM_FEEDS];
+logic [NUM_FEEDS-1:0] skid_seq_valid, skid_seq_valid_nxt;
+logic [BYTE_CNT_W-1:0] skid_byte_cnt     [NUM_FEEDS];
+logic [BYTE_CNT_W-1:0] skid_byte_cnt_nxt [NUM_FEEDS];
 
 logic [HICCUP_W-1:0]  hiccup_cnt, hiccup_cnt_nxt;
 logic                 giveup;
@@ -82,6 +94,8 @@ always_comb begin : eff_view
         eff_eop[i]   = skid_valid[i] ? skid_eop[i]  : feed_eop[i];
         eff_seq[i]   = skid_valid[i] ? skid_seq[i]  : feed_seq[i];
         eff_data[i]  = skid_valid[i] ? skid_data[i] : feed_data[i];
+        eff_seq_valid[i] = skid_valid[i] ? skid_seq_valid[i] : feed_seq_valid[i];
+        eff_byte_cnt[i]  = skid_valid[i] ? skid_byte_cnt[i]  : feed_byte_cnt[i];
     end
 end
 
@@ -122,11 +136,14 @@ always_comb begin : serve_mux
     // OR-reduction instead of sequential priority chain — flattens
     // the mux from 4 LUT levels down to ~2, since it no longer
     // depends on evaluation order (serve_feed is always one-hot)
+    serve_seq_valid_c = |(serve_feed & eff_seq_valid);
     serve_seq_c  = '0;
     serve_data_c = '0;
+    serve_byte_cnt_c = '0;
     for (int i = 0; i < NUM_FEEDS; i++) begin
         serve_seq_c  |= eff_seq[i]  & {SEQ_W{serve_feed[i]}};
         serve_data_c |= eff_data[i] & {DATA_W{serve_feed[i]}};
+        serve_byte_cnt_c |= eff_byte_cnt[i] & {BYTE_CNT_W{serve_feed[i]}};
     end
 end
 
@@ -137,6 +154,8 @@ always_comb begin : skid_upd
         skid_sop_nxt[i]   = skid_sop[i];
         skid_eop_nxt[i]   = skid_eop[i];
         skid_seq_nxt[i]   = skid_seq[i];
+        skid_seq_valid_nxt[i] = skid_seq_valid[i];
+        skid_byte_cnt_nxt[i]  = skid_byte_cnt[i];
 
         if (skid_valid[i]) begin
             if (serve_feed[i] && out_ready) begin
@@ -145,6 +164,8 @@ always_comb begin : skid_upd
                     skid_sop_nxt[i]  = feed_sop[i];
                     skid_eop_nxt[i]  = feed_eop[i];
                     skid_seq_nxt[i]  = feed_seq[i];
+                    skid_seq_valid_nxt[i] = feed_seq_valid[i];
+                    skid_byte_cnt_nxt[i]  = feed_byte_cnt[i];
                 end else begin
                     skid_valid_nxt[i] = 1'b0;
                 end
@@ -155,6 +176,8 @@ always_comb begin : skid_upd
             skid_sop_nxt[i]   = feed_sop[i];
             skid_eop_nxt[i]   = feed_eop[i];
             skid_seq_nxt[i]   = feed_seq[i];
+            skid_seq_valid_nxt[i] = feed_seq_valid[i];
+            skid_byte_cnt_nxt[i]  = feed_byte_cnt[i];
         end
     end
 end
@@ -175,9 +198,12 @@ always_ff @(posedge clk) begin : stage1_ff
         serve_eop_q   <= 1'b0;
         serve_seq_q   <= '0;
         serve_data_q  <= '0;
+        serve_seq_valid_q <= 1'b0;
+        serve_byte_cnt_q  <= '0;
         skid_valid    <= '0;
         skid_sop      <= '0;
         skid_eop      <= '0;
+        skid_seq_valid <= '0;
     end else begin
         serve_feed_q  <= serve_feed;
         serve_valid_q <= serve_valid_c && out_ready;
@@ -185,15 +211,19 @@ always_ff @(posedge clk) begin : stage1_ff
         serve_eop_q   <= serve_eop_c   && out_ready;
         serve_seq_q   <= serve_seq_c;
         serve_data_q  <= serve_data_c;
+        serve_seq_valid_q <= serve_seq_valid_c;
+        serve_byte_cnt_q  <= serve_byte_cnt_c;
         skid_valid    <= skid_valid_nxt;
         skid_sop      <= skid_sop_nxt;
         skid_eop      <= skid_eop_nxt;
+        skid_seq_valid <= skid_seq_valid_nxt;
     end
 end
 
 always_ff @(posedge clk) begin
     skid_data <= skid_data_nxt;
     skid_seq  <= skid_seq_nxt;
+    skid_byte_cnt <= skid_byte_cnt_nxt;
 end
 
 // =================================================================
@@ -251,8 +281,10 @@ always_comb begin : output_drive
     out_valid = serve_valid_q;
     out_data  = serve_data_q;
     out_seq   = serve_seq_q;
+    out_seq_valid = serve_seq_valid_q;
     out_sop   = serve_sop_q;
     out_eop   = serve_eop_q;
+    out_byte_cnt  = serve_byte_cnt_q;
 
     out_feed = '0;
     for (int i = 0; i < NUM_FEEDS; i++)

@@ -44,6 +44,8 @@ All ports are synchronous to `clk` and reset by the active-low `rst_n`.
 | `feed_eop` | `NUM_FEEDS` | End-of-packet marker per feed. |
 | `feed_data` | `NUM_FEEDS` x `DATA_W` | Payload per feed. |
 | `feed_seq` | `NUM_FEEDS` x `SEQ_W` | Sequence number per feed. |
+| `feed_seq_valid` | `NUM_FEEDS` | Sequence number valid per feed. |
+| `feed_byte_cnt` | `NUM_FEEDS` x `$clog2(DATA_W/8)` | Index of the last valid byte in the beat, per feed. |
 | `fix_avail` | `NUM_FEEDS` | Set by FIX_TRACKER to mark which feed currently carries a preferred, corrected packet. |
 
 ### Per-feed outputs
@@ -61,7 +63,9 @@ All ports are synchronous to `clk` and reset by the active-low `rst_n`.
 | `out_valid` | 1 | Registered output valid. |
 | `out_data` | `DATA_W` | Registered output payload. |
 | `out_seq` | `SEQ_W` | Registered output sequence number. |
+| `out_seq_valid` | 1 | Registered output sequence number valid. |
 | `out_sop` / `out_eop` | 1 each | Registered packet boundary markers. |
+| `out_byte_cnt` | `$clog2(DATA_W/8)` | Registered output byte count. |
 | `out_feed` | `FEED_ID_W` | Index of the feed the current output beat came from. |
 
 ### Fix reporting
@@ -97,7 +101,7 @@ Everything decided in Stage 1, which feed was picked, its data and boundary mark
 
 ### Stage 2: output and starvation tracking
 
-Stage 2 holds the registered output (`out_valid`, `out_data`, `out_seq`, `out_sop`, `out_eop`, `out_feed`), and separately tracks how long the currently selected feed has gone silent. That tracking is what drives the starvation and recovery mechanism, covered cycle by cycle in the next section.
+Stage 2 holds the registered output (`out_valid`, `out_data`, `out_seq`, `out_seq_valid`, `out_sop`, `out_eop`, `out_byte_cnt`, `out_feed`), and separately tracks how long the currently selected feed has gone silent. That tracking is what drives the starvation and recovery mechanism, covered cycle by cycle in the next section.
 
 ## 4. Behaviour
 
@@ -175,24 +179,24 @@ This part was chosen because it was the device family available in the toolchain
 
 ### Result
 
-All constraints are met. Worst negative slack on setup is +0.298 ns across 514 endpoints, 0 failing. Worst hold slack is +0.090 ns, also 0 failing. Pulse width checks pass with +1.188 ns of margin.
+All constraints are met. Worst negative slack on setup is +0.416 ns across 534 endpoints, 0 failing. Worst hold slack is +0.090 ns, also 0 failing. Pulse width checks pass with +1.188 ns of margin.
 
 ### Worst path
 
-The five worst setup paths in the report are the same logical path repeated across different bit positions of the same destination register, all at +0.298 ns slack:
+The five worst setup paths in the report are the same logical path repeated across different bit positions of the same destination register, all at +0.416 ns slack:
 
-- Source: `skid_valid_reg[0]/C`, feed 0's skid buffer valid bit.
-- Destination: `skid_data_reg[1][*]/CE`, the clock enable on feed 1's skid data register.
+- Source: `invalidate_feed_q_reg[1]/C`, feed 1's bit of `invalidate_feed_q`.
+- Destination: `skid_byte_cnt_reg[0][*]/CE`, the clock enable on feed 0's skid byte count register.
 - 4 logic levels: LUT4 x1, LUT5 x1, LUT6 x2.
-- Data path delay 2.407 ns: 0.474 ns logic, 1.933 ns routing.
+- Data path delay 2.289 ns: 0.474 ns logic, 1.815 ns routing.
 
-Routing is 80% of the delay because nothing is placed yet. A post-route run will move this number, in either direction, placement and `phys_opt_design` can recover some of it, real routing can also add more.
+Routing is 79% of the delay because nothing is placed yet. A post-route run will move this number, in either direction, placement and `phys_opt_design` can recover some of it, real routing can also add more.
 
-The path sits at the interaction between the `in_ready` computation and skid buffer control described in section 3: feed 0 going valid feeds into shared readiness logic that, several LUT levels later, reaches the clock enable on feed 1's skid register. The individual net names in the report (`in_ready_OBUF[3]_inst_i_7` and similar) are synthesis-internal and don't map one-to-one back to RTL signal names, so this description stops at what the report actually supports.
+The path starts at `invalidate_feed_q`, which feeds the `sticky` term in the serve mux. That decides `serve_feed`, and `serve_feed` reaches the clock enable on feed 0's skid registers. The net names in the report (`in_ready_OBUF[0]_inst_i_2` and similar) are synthesis-internal and do not map one-to-one to RTL signal names.
 
 ### Resource utilization
 
-444 Slice LUTs (0.44% of the device), 510 Slice Registers (0.25%). 0 Block RAM, 0 DSP. The design is small relative to the device; the timing result is not resource-constrained.
+400 Slice LUTs (0.39% of the device), 530 Slice Registers (0.26%). 0 Block RAM, 0 DSP. The design is small relative to the device; the timing result is not resource-constrained.
 
 ### Caveats on these numbers
 

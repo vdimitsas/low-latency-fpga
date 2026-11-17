@@ -27,6 +27,10 @@ SAMPLE_DELAY_NS = 8
 SEQ_MASK = (1 << SEQ_W) - 1
 DATA_MASK = (1 << DATA_W) - 1
 
+BYTES_PER_BEAT = DATA_W // 8
+BYTE_CNT_W = (BYTES_PER_BEAT - 1).bit_length()
+BYTE_CNT_MAX = BYTES_PER_BEAT - 1
+
 
 def _pack(values, width):
     word = 0
@@ -47,11 +51,13 @@ def _bits(word, count):
 class Beat:
     """One beat as it moves through the model."""
 
-    def __init__(self, data, seq, sop, eop):
+    def __init__(self, data, seq, sop, eop, seq_valid=1, byte_cnt=BYTE_CNT_MAX):
         self.data = data & DATA_MASK
         self.seq = seq & SEQ_MASK
         self.sop = sop
         self.eop = eop
+        self.seq_valid = seq_valid
+        self.byte_cnt = byte_cnt
 
     def __eq__(self, other):
         return (
@@ -59,12 +65,15 @@ class Beat:
             and self.seq == other.seq
             and self.sop == other.sop
             and self.eop == other.eop
+            and self.seq_valid == other.seq_valid
+            and self.byte_cnt == other.byte_cnt
         )
 
     def __repr__(self):
         return (
             f"Beat(data={self.data:#x}, seq={self.seq:#x}, "
-            f"sop={self.sop}, eop={self.eop})"
+            f"sop={self.sop}, eop={self.eop}, "
+            f"seq_valid={self.seq_valid}, byte_cnt={self.byte_cnt})"
         )
 
 
@@ -189,16 +198,27 @@ class FeedBufferTB:
         self.in_seq = [0] * self.n_feeds
         self.in_sop = [0] * self.n_feeds
         self.in_eop = [0] * self.n_feeds
+        self.in_seq_valid = [1] * self.n_feeds
+        self.in_byte_cnt = [BYTE_CNT_MAX] * self.n_feeds
         self.out_ready = [1] * self.n_feeds
         self.invalidate_feed = [0] * self.n_feeds
 
-    def present(self, feed, data=0, seq=0, sop=0, eop=0, valid=1):
-        """Stage one feed's stimulus for the coming cycle."""
+    def present(self, feed, data=0, seq=0, sop=0, eop=0, valid=1,
+                seq_valid=1, byte_cnt=None):
+        """Stage one feed's stimulus for the coming cycle.
+
+        byte_cnt defaults to a full beat.
+        """
         self.in_valid[feed] = valid
         self.in_data[feed] = data
         self.in_seq[feed] = seq
         self.in_sop[feed] = sop
         self.in_eop[feed] = eop
+        self.in_seq_valid[feed] = seq_valid
+        if byte_cnt is None:
+            self.in_byte_cnt[feed] = BYTE_CNT_MAX
+        else:
+            self.in_byte_cnt[feed] = byte_cnt
 
     def idle_feeds(self):
         for f in range(self.n_feeds):
@@ -216,6 +236,8 @@ class FeedBufferTB:
         d.in_eop.value = _pack(self.in_eop, 1)
         d.in_data_flat.value = _pack(self.in_data, DATA_W)
         d.in_seq_flat.value = _pack(self.in_seq, SEQ_W)
+        d.in_seq_valid.value = _pack(self.in_seq_valid, 1)
+        d.in_byte_cnt_flat.value = _pack(self.in_byte_cnt, BYTE_CNT_W)
         d.out_ready.value = _pack(self.out_ready, 1)
         d.invalidate_feed.value = _pack(self.invalidate_feed, 1)
 
@@ -228,6 +250,9 @@ class FeedBufferTB:
             "out_eop": _bits(int(d.out_eop.value), self.n_feeds),
             "out_data": _unpack(int(d.out_data_flat.value), DATA_W, self.n_feeds),
             "out_seq": _unpack(int(d.out_seq_flat.value), SEQ_W, self.n_feeds),
+            "out_seq_valid": _bits(int(d.out_seq_valid.value), self.n_feeds),
+            "out_byte_cnt": _unpack(int(d.out_byte_cnt_flat.value), BYTE_CNT_W,
+                                    self.n_feeds),
         }
 
     def out_beat(self, got, feed):
@@ -237,6 +262,8 @@ class FeedBufferTB:
             got["out_seq"][feed],
             got["out_sop"][feed],
             got["out_eop"][feed],
+            got["out_seq_valid"][feed],
+            got["out_byte_cnt"][feed],
         )
 
     async def start(self):
@@ -264,12 +291,19 @@ class FeedBufferTB:
         await Timer(DRIVE_DELAY_NS, "ns")
         self._apply()
 
-        beats = [
-            Beat(self.in_data[f], self.in_seq[f], self.in_sop[f], self.in_eop[f])
-            if self.in_valid[f]
-            else None
-            for f in range(self.n_feeds)
-        ]
+        beats = []
+        for f in range(self.n_feeds):
+            if self.in_valid[f]:
+                beats.append(Beat(
+                    self.in_data[f],
+                    self.in_seq[f],
+                    self.in_sop[f],
+                    self.in_eop[f],
+                    self.in_seq_valid[f],
+                    self.in_byte_cnt[f],
+                ))
+            else:
+                beats.append(None)
         stim = dict(
             in_valid=list(self.in_valid),
             beats=beats,

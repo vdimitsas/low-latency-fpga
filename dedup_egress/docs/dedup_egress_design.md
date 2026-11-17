@@ -55,21 +55,25 @@ This block does not extract the sequence number. Every beat arrives with one on
 | `in_ready` | out | 1 | The block accepts a beat this cycle |
 | `in_data` | in | `DATA_W` | Beat payload |
 | `in_seq` | in | `SEQ_W` | Sequence number of the packet this beat belongs to |
+| `in_seq_valid` | in | 1 | `in_seq` holds a real value on this beat |
 | `in_sop` | in | 1 | First beat of a packet |
 | `in_eop` | in | 1 | Last beat of a packet |
+| `in_byte_cnt` | in | `$clog2(DATA_W/8)` | Index of the last valid byte in the beat |
 | `out_valid` | out | 1 | A beat is being presented downstream |
 | `out_ready` | in | 1 | Downstream accepts a beat this cycle |
 | `out_data` | out | `DATA_W` | Beat payload |
 | `out_seq` | out | `SEQ_W` | Sequence number, passed through |
+| `out_seq_valid` | out | 1 | Passed through |
 | `out_sop` | out | 1 | First beat of a packet |
 | `out_eop` | out | 1 | Last beat of a packet |
+| `out_byte_cnt` | out | `$clog2(DATA_W/8)` | Passed through |
 | `cmpl_valid` | in | 1 | A completion is being reported this cycle |
 | `cmpl_seq` | in | `SEQ_W` | Sequence number of the completed packet |
 
 ### Environment assumption
 
-Upstream holds `in_valid`, `in_data`, `in_seq`, `in_sop` and `in_eop` stable
-while `in_ready` is low.
+Upstream holds `in_valid`, `in_data`, `in_seq`, `in_seq_valid`, `in_sop`,
+`in_eop` and `in_byte_cnt` stable while `in_ready` is low.
 
 `cmpl_valid` and `cmpl_seq` are a report, not a handshake. There is no ready
 signal back to `CHECKSUM`. This block never refuses a completion and never
@@ -128,7 +132,8 @@ LUTs, which is visible in the timing report for this block.
 `cpt_match_q` and `bypass_match_q`. The drop decision is made on the far side
 of that register, from the registered results.
 
-The registered beat is `valid_q`, `data_q`, `sop_q`, `eop_q` and `seq_q`.
+The registered beat is `valid_q`, `data_q`, `sop_q`, `eop_q`, `seq_q`,
+`seq_valid_q` and `byte_cnt_q`.
 
 `valid_q` is enabled by `in_ready` alone, with no `in_valid` qualifier. It has
 to be able to take a zero, so that when the stage is open and no beat is
@@ -156,7 +161,8 @@ the comparison work happened in the previous cycle.
 
 `out_valid` is `valid_q && !drop`. A dropped beat is simply not presented
 downstream. Nothing else about the beat changes: `out_data`, `out_seq`,
-`out_sop` and `out_eop` are the registered values passed straight through.
+`out_seq_valid`, `out_sop`, `out_eop` and `out_byte_cnt` are the registered
+values passed straight through.
 
 ### Same cycle bypass
 
@@ -307,7 +313,7 @@ its job.
 
 ### Utilisation
 
-228 LUTs and 608 registers on the synthesised harness. Most of the registers
+228 LUTs and 620 registers on the synthesised harness. Most of the registers
 are the harness flops, not the block.
 
 ## 7. Verification
@@ -335,8 +341,8 @@ are combinational, so they have to be computed before anything is written.
 `DedupEgressTB.step` runs one cycle. It drives the staged stimulus to the DUT
 and to the model at the same point, waits for the clock edge, reads the DUT at
 the `ReadOnly` phase, and asserts the two agree on `out_valid`, `in_ready`,
-and, when a beat is being presented, on `out_seq`, `out_data`, `out_sop` and
-`out_eop`.
+and, when a beat is being presented, on `out_seq`, `out_seq_valid`,
+`out_data`, `out_sop`, `out_eop` and `out_byte_cnt`.
 
 Reading after the edge is what makes the tests direct. The outputs `step`
 returns belong to the beat driven in that same call, so a test presents a beat

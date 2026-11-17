@@ -16,7 +16,7 @@ import random
 
 import cocotb
 
-from feed_buffer_common import FeedBufferTB, N_FEEDS
+from feed_buffer_common import BYTE_CNT_MAX, FeedBufferTB, N_FEEDS
 
 CYCLES = 3000
 
@@ -46,12 +46,15 @@ async def _run(tb, rnd, cycles, stall_p, start_p, invalidate_p, max_beats=6):
                     st.seq = seq_counter
                     st.remaining = rnd.randint(1, max_beats)
                     st.in_packet = True
+                    first_is_last = st.remaining == 1
                     tb.present(
                         f,
                         data=rnd.getrandbits(32),
                         seq=st.seq,
                         sop=1,
-                        eop=1 if st.remaining == 1 else 0,
+                        eop=1 if first_is_last else 0,
+                        seq_valid=rnd.randint(0, 1),
+                        byte_cnt=rnd.randint(0, BYTE_CNT_MAX) if first_is_last else None,
                     )
                     st.remaining -= 1
                     if st.remaining == 0:
@@ -64,6 +67,8 @@ async def _run(tb, rnd, cycles, stall_p, start_p, invalidate_p, max_beats=6):
                     seq=st.seq,
                     sop=0,
                     eop=1 if last else 0,
+                    seq_valid=rnd.randint(0, 1),
+                    byte_cnt=rnd.randint(0, BYTE_CNT_MAX) if last else None,
                 )
                 st.remaining -= 1
                 if last:

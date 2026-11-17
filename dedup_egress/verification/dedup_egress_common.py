@@ -32,6 +32,10 @@ CLK_PERIOD_NS = 10
 SEQ_MASK = (1 << SEQ_W) - 1
 DATA_MASK = (1 << DATA_W) - 1
 
+BYTES_PER_BEAT = DATA_W // 8
+BYTE_CNT_W = (BYTES_PER_BEAT - 1).bit_length()
+BYTE_CNT_MAX = BYTES_PER_BEAT - 1
+
 
 class GoldenDedupEgress:
     """Reference model of dedup_egress, cycle accurate.
@@ -58,6 +62,8 @@ class GoldenDedupEgress:
         self.in_seq = 0
         self.in_sop = 0
         self.in_eop = 0
+        self.in_seq_valid = 0
+        self.in_byte_cnt = 0
         self.out_ready = 0
         self.cmpl_valid = 0
         self.cmpl_seq = 0
@@ -71,17 +77,21 @@ class GoldenDedupEgress:
         self.sop_q = 0
         self.eop_q = 0
         self.seq_q = 0
+        self.seq_valid_q = 0
+        self.byte_cnt_q = 0
         self.cpt_match_q = 0
         self.bypass_match_q = 0
 
-    def drive(self, in_valid, in_data, in_seq, in_sop, in_eop, out_ready,
-              cmpl_valid, cmpl_seq):
+    def drive(self, in_valid, in_data, in_seq, in_sop, in_eop, in_seq_valid,
+              in_byte_cnt, out_ready, cmpl_valid, cmpl_seq):
         """Put this cycle's inputs on the model, the way wires hold them."""
         self.in_valid = in_valid
         self.in_data = in_data & DATA_MASK
         self.in_seq = in_seq & SEQ_MASK
         self.in_sop = in_sop
         self.in_eop = in_eop
+        self.in_seq_valid = in_seq_valid
+        self.in_byte_cnt = in_byte_cnt
         self.out_ready = out_ready
         self.cmpl_valid = cmpl_valid
         self.cmpl_seq = cmpl_seq & SEQ_MASK
@@ -135,6 +145,8 @@ class GoldenDedupEgress:
             self.sop_q = self.in_sop
             self.eop_q = self.in_eop
             self.seq_q = self.in_seq
+            self.seq_valid_q = self.in_seq_valid
+            self.byte_cnt_q = self.in_byte_cnt
             self.cpt_match_q = cpt_match
             self.bypass_match_q = bypass_match
 
@@ -161,6 +173,8 @@ class GoldenDedupEgress:
             "out_sop": self.sop_q,
             "out_eop": self.eop_q,
             "out_seq": self.seq_q,
+            "out_seq_valid": self.seq_valid_q,
+            "out_byte_cnt": self.byte_cnt_q,
         }
 
 
@@ -178,11 +192,13 @@ class DedupEgressTB:
         self.in_seq = 0
         self.in_sop = 0
         self.in_eop = 0
+        self.in_seq_valid = 1
+        self.in_byte_cnt = BYTE_CNT_MAX
         self.out_ready = 1
         self.cmpl_valid = 0
         self.cmpl_seq = 0
 
-    def present(self, seq, data=0, sop=0, eop=0):
+    def present(self, seq, data=0, sop=0, eop=0, seq_valid=1, byte_cnt=None):
         """Stage a valid beat for the coming cycle.
 
         seq is required. Every beat carries its own sequence number on in_seq,
@@ -190,12 +206,19 @@ class DedupEgressTB:
 
         To stage an idle cycle, call idle_stream, or simply do not call this:
         step clears the stimulus after every cycle.
+
+        byte_cnt defaults to a full beat.
         """
         self.in_valid = 1
         self.in_data = data
         self.in_seq = seq & SEQ_MASK
         self.in_sop = sop
         self.in_eop = eop
+        self.in_seq_valid = seq_valid
+        if byte_cnt is None:
+            self.in_byte_cnt = BYTE_CNT_MAX
+        else:
+            self.in_byte_cnt = byte_cnt
 
     def idle_stream(self):
         self.in_valid = 0
@@ -213,6 +236,8 @@ class DedupEgressTB:
         d.in_seq.value = self.in_seq
         d.in_sop.value = self.in_sop
         d.in_eop.value = self.in_eop
+        d.in_seq_valid.value = self.in_seq_valid
+        d.in_byte_cnt.value = self.in_byte_cnt
         d.out_ready.value = self.out_ready
         d.cmpl_valid.value = self.cmpl_valid
         d.cmpl_seq.value = self.cmpl_seq
@@ -226,6 +251,8 @@ class DedupEgressTB:
             "out_eop": int(d.out_eop.value),
             "out_data": int(d.out_data.value),
             "out_seq": int(d.out_seq.value),
+            "out_seq_valid": int(d.out_seq_valid.value),
+            "out_byte_cnt": int(d.out_byte_cnt.value),
         }
 
     async def start(self):
@@ -258,6 +285,8 @@ class DedupEgressTB:
             in_seq=self.in_seq,
             in_sop=self.in_sop,
             in_eop=self.in_eop,
+            in_seq_valid=self.in_seq_valid,
+            in_byte_cnt=self.in_byte_cnt,
             out_ready=self.out_ready,
             cmpl_valid=self.cmpl_valid,
             cmpl_seq=self.cmpl_seq,
@@ -293,6 +322,14 @@ class DedupEgressTB:
                 f"out_eop mismatch: got {got['out_eop']} "
                 f"expected {expected['out_eop']}"
             )
+            assert got["out_seq_valid"] == expected["out_seq_valid"], (
+                f"out_seq_valid mismatch: got {got['out_seq_valid']} "
+                f"expected {expected['out_seq_valid']}"
+            )
+            assert got["out_byte_cnt"] == expected["out_byte_cnt"], (
+                f"out_byte_cnt mismatch: got {got['out_byte_cnt']} "
+                f"expected {expected['out_byte_cnt']}"
+            )
 
         self.cmpl_valid = 0
         self.cmpl_seq = 0
@@ -304,7 +341,7 @@ class DedupEgressTB:
         return got
 
 
-async def send_packet(tb, seq, beats):
+async def send_packet(tb, seq, beats, last_byte_cnt=None):
     """Stream a whole packet, returning one sample per beat.
 
     in_ready is read after the edge, so it is the value for the coming cycle.
@@ -321,6 +358,7 @@ async def send_packet(tb, seq, beats):
             data=0xA0 + i,
             sop=1 if i == 0 else 0,
             eop=1 if i == beats - 1 else 0,
+            byte_cnt=last_byte_cnt if i == beats - 1 else None,
         )
         got = await tb.step()
 
