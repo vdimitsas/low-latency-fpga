@@ -96,7 +96,7 @@ module sync_fifo #(
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             wr_ptr <= '0;
         end else if (wr_en) begin
@@ -107,7 +107,7 @@ module sync_fifo #(
     // -------------------------------------------------------------------------
     // read
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             rd_ptr <= '0;
         end else if (rd_en && !empty) begin

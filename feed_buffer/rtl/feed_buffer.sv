@@ -103,7 +103,7 @@ module feed_buffer #(
             logic drop;
             assign drop = (invalidate_feed[f] || invalidated[f]) && !in_sop[f];
 
-            always_ff @(posedge clk or negedge rst_n) begin
+            always_ff @(posedge clk) begin
                 if (!rst_n) begin
                     invalidated[f] <= 1'b0;
                 end else if (in_valid[f] && in_ready[f] &&
@@ -176,7 +176,7 @@ module feed_buffer #(
             // Registered so out_ready never reaches back into this block's own
             // ready path. Holds its contents while the arbiter is not ready.
             // -----------------------------------------------------------------
-            always_ff @(posedge clk or negedge rst_n) begin
+            always_ff @(posedge clk) begin
                 if (!rst_n) begin
                     out_reg[f]       <= '0;
                     out_reg_valid[f] <= 1'b0;

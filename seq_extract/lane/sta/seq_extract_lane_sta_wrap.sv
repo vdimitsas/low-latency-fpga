@@ -46,7 +46,7 @@ module seq_extract_lane_sta_wrap #(
     logic [BYTE_CNT_W-1:0] in_byte_cnt_q;
     logic                  out_ready_q;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             in_valid_q    <= 1'b0;
             in_data_q     <= '0;
@@ -106,7 +106,7 @@ module seq_extract_lane_sta_wrap #(
     // -------------------------------------------------------------------------
     // output side flops
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             in_ready      <= 1'b0;
             out_valid     <= 1'b0;

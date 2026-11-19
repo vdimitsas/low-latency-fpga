@@ -122,7 +122,7 @@ module dedup_ingress #(
     // seq_valid_regs clears on SOP so a new packet starts with no sequence
     // number, and sets on the beat in_seq_valid marks.
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             seq_regs       <= '0;
             seq_valid_regs <= '0;
@@ -190,7 +190,7 @@ module dedup_ingress #(
     // there, and a copy far enough behind to fall outside this window is beyond
     // what any bounded table can catch.
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             cpt_seq      <= '0;
             cpt_occupied <= '0;
@@ -236,7 +236,7 @@ module dedup_ingress #(
     // With out_ready the register loads only once downstream has taken its
     // beat, and a dropped beat never gets in.
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             out_valid     <= '0;
             out_data      <= '0;

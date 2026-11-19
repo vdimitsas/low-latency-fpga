@@ -73,7 +73,7 @@ module seq_extract_lane #(
 
     logic [CNT_W-1:0] beat_cnt;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             beat_cnt <= '0;
         end else if (in_valid && in_ready) begin
@@ -110,7 +110,7 @@ module seq_extract_lane #(
     // Set at the start of every packet and cleared on the beat that completes
     // the field. One packet, one capture.
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             seq_pending_q <= 1'b1;
         end else if (in_valid && in_ready) begin
@@ -128,7 +128,7 @@ module seq_extract_lane #(
 
     generate
         if (SPAN) begin : g_span
-            always_ff @(posedge clk or negedge rst_n) begin
+            always_ff @(posedge clk) begin
                 if (!rst_n)
                     seq_lo_q <= '0;
                 else if (at_seq_beat)
@@ -154,7 +154,7 @@ module seq_extract_lane #(
 
     generate
         if (SPAN) begin : g_seq_span
-            always_ff @(posedge clk or negedge rst_n) begin
+            always_ff @(posedge clk) begin
                 if (!rst_n) begin
                     seq_q       <= '0;
                     seq_valid_q <= 1'b0;
@@ -167,7 +167,7 @@ module seq_extract_lane #(
                 end
             end
         end else begin : g_seq_fit
-            always_ff @(posedge clk or negedge rst_n) begin
+            always_ff @(posedge clk) begin
                 if (!rst_n) begin
                     seq_q       <= '0;
                     seq_valid_q <= 1'b0;
@@ -195,7 +195,7 @@ module seq_extract_lane #(
     logic                  eop_q;
     logic [BYTE_CNT_W-1:0] byte_cnt_q;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             valid_q    <= 1'b0;
             data_q     <= '0;

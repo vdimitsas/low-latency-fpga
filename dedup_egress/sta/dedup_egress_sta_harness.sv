@@ -62,7 +62,7 @@ module dedup_egress_sta_harness #(
     logic              cmpl_valid_q;
     logic [SEQ_W-1:0]  cmpl_seq_q;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             in_valid_q   <= '0;
             in_data_q    <= '0;
@@ -133,7 +133,7 @@ module dedup_egress_sta_harness #(
     // -------------------------------------------------------------------------
     // output side registers
     // -------------------------------------------------------------------------
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             in_ready  <= '0;
             out_valid <= '0;

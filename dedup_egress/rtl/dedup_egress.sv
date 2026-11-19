@@ -91,7 +91,7 @@ module dedup_egress #(
         cmpl_present = |cmpl_match;
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             cpt_seq      <= '0;
             cpt_occupied <= '0;
@@ -156,7 +156,7 @@ module dedup_egress #(
     logic [CPT_DEPTH-1:0] cpt_match_q;
     logic                 bypass_match_q;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             valid_q        <= 1'b0;
             data_q         <= '0;
