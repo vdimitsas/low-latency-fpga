@@ -25,9 +25,8 @@ How each of those works is in
 
 ## Timing
 
-Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.687 ns**
-post synthesis. The worst path and what drives it are in
-[`docs/feed_buffer_design.md`](docs/feed_buffer_design.md), section 6.
+Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.497 ns**
+post synthesis.
 
 ```bash
 cd sta && vivado -mode batch -source run.tcl

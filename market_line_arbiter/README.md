@@ -29,8 +29,7 @@ sections 3 and 4.
 ## Timing
 
 Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.416 ns**
-post synthesis. The worst path, the resource numbers, and the caveats on both
-are in
+post synthesis. How it was run is in
 [`docs/market_line_arbiter_design.md`](docs/market_line_arbiter_design.md),
 section 6.
 

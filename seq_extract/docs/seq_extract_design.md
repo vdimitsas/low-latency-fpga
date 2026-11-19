@@ -66,7 +66,7 @@ down to each lane as `BYTE_CNT_W`.
 | Port | Dir | Width | Meaning |
 |---|---|---|---|
 | `clk` | in | 1 | Clock. |
-| `rst_n` | in | 1 | Active low asynchronous reset. |
+| `rst_n` | in | 1 | Active low synchronous reset. |
 | `in_valid` | in | `N_FEEDS` | Beat valid, per feed. |
 | `in_ready` | out | `N_FEEDS` | Beat accepted, per feed. |
 | `in_data` | in | `N_FEEDS` x `DATA_W` | Beat data, per feed. |
@@ -386,24 +386,10 @@ join and is the more expensive of the two elaborations.
 
 | Module | WNS |
 |---|---|
-| `seq_extract_lane` | +1.509 ns |
-| `seq_extract` | +1.258 ns |
+| `seq_extract_lane` | +1.252 ns |
+| `seq_extract` | +1.252 ns |
 
 Both post synthesis, with zero warnings.
-
-The wrapper is close to the lane because the lanes are independent. Four copies
-of the same logic with nothing between them do not lengthen the worst path; the
-difference comes from placement pressure, not from depth.
-
-### Margin
-
-+1.258 ns on a 3.077 ns period is a large margin, and it is expected. The block
-does a byte slice and a concatenation, both of which are wiring. The only real
-logic is the counter increment and the equality against `SEQ_BEAT`, and the
-counter is a few bits wide.
-
-There is room here for work to move in. If extraction of further header fields
-is ever added to this stage, this is where the budget comes from.
 
 ## 7. Verification
 

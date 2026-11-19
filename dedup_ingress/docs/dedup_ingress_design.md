@@ -59,7 +59,7 @@ business, and this block never looks at `in_data`.
 | Port | Dir | Width | Meaning |
 |---|---|---|---|
 | `clk` | in | 1 | Clock. |
-| `rst_n` | in | 1 | Active low asynchronous reset. |
+| `rst_n` | in | 1 | Active low synchronous reset. |
 | `in_valid` | in | `N_FEEDS` | Beat valid, per feed. |
 | `in_ready` | out | `N_FEEDS` | Beat accepted, per feed. |
 | `in_data` | in | `N_FEEDS` x `DATA_W` | Beat data, per feed. |
@@ -342,9 +342,6 @@ with no assumed budget. The flops belong to the measurement, not the design.
 ### Result
 
 WNS **+0.122 ns** post synthesis, with zero warnings.
-
-The worst path runs from `in_seq` through the comparison and the drop, and ends
-at `out_valid`.
 
 ### If depth grows
 

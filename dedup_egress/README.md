@@ -40,9 +40,7 @@ How each of those works is in
 ## Timing
 
 Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.257 ns**
-post synthesis. The worst path is not on the datapath, it is the completion
-write enable. That path, and why this block needs a synthesis harness to be
-measured, are in
+post synthesis. Why this block needs a synthesis harness to be measured is in
 [`docs/dedup_egress_design.md`](docs/dedup_egress_design.md), section 6.
 
 ```bash

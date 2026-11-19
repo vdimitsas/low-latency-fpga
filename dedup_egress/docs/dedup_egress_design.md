@@ -50,7 +50,7 @@ This block does not extract the sequence number. Every beat arrives with one on
 | Port | Direction | Width | Meaning |
 |---|---|---|---|
 | `clk` | in | 1 | Clock |
-| `rst_n` | in | 1 | Active low asynchronous reset |
+| `rst_n` | in | 1 | Active low synchronous reset. |
 | `in_valid` | in | 1 | A beat is being offered |
 | `in_ready` | out | 1 | The block accepts a beat this cycle |
 | `in_data` | in | `DATA_W` | Beat payload |
@@ -293,28 +293,6 @@ design.
 ### Result
 
 **WNS +0.257 ns** at 325 MHz, post synthesis, zero warnings.
-
-The worst path is not on the datapath. It is the completion write enable:
-
-| | |
-|---|---|
-| Source | `cpt_seq_reg[4][4]/C` |
-| Destination | `cpt_seq_reg[0][0]/CE` |
-| Data path delay | 2.448 ns, logic 0.932 ns, route 1.516 ns |
-| Logic levels | 6: three CARRY4, two LUT6, one LUT4 |
-
-That path is `cpt_seq` into the equality comparison against `cmpl_seq`, into
-`cmpl_match`, into `cmpl_present`, into the write enable of `cpt_seq`. It is
-the duplicate completion suppression described in section 3, and the three
-CARRY4 are the wide equality comparisons.
-
-The beat path does not appear near the top of the report. The register cut did
-its job.
-
-### Utilisation
-
-228 LUTs and 620 registers on the synthesised harness. Most of the registers
-are the harness flops, not the block.
 
 ## 7. Verification
 

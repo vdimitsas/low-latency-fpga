@@ -40,8 +40,8 @@ How each of those works is in
 
 ## Timing
 
-Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+1.258 ns**
-post synthesis for the wrapper and **+1.509 ns** for the lane. Why this block
+Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+1.252 ns**
+post synthesis for both the wrapper and the lane. Why this block
 needs a synthesis harness to be measured at all is in
 [`docs/seq_extract_design.md`](docs/seq_extract_design.md), section 6.
 

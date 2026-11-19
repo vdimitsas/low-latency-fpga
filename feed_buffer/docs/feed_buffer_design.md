@@ -49,7 +49,7 @@ alongside `N_FEEDS` being at least one and `FIFO_DEPTH` at least two.
 | Port | Direction | Width | Meaning |
 |---|---|---|---|
 | `clk` | in | 1 | |
-| `rst_n` | in | 1 | Active low, asynchronous. |
+| `rst_n` | in | 1 | Active low synchronous reset. |
 | `in_valid` | in | `N_FEEDS` | Per feed. |
 | `in_ready` | out | `N_FEEDS` | Per feed. |
 | `in_data` | in | `N_FEEDS` x `DATA_W` | |
@@ -326,26 +326,7 @@ as the silence lasts.
 Synthesised for Xilinx Kintex-7 `xc7k160tffg676-3` at 325 MHz, a 3.077 ns
 period.
 
-**WNS +0.687 ns** post synthesis.
-
-```
-Source:       g_feed[3].u_fifo/wr_ptr_reg[1]/C
-Destination:  g_feed[3].u_fifo/mem_reg_0_31_0_5/RAMA/WE
-Data Path Delay: 1.921 ns  (logic 0.431 ns, route 1.490 ns)
-```
-
-The path runs from a FIFO write pointer bit, through the comparison that
-produces `full`, through `in_ready` and the bypass decision, to the FIFO write
-enable. Which feed it lands on is placement, not structure: all `N_FEEDS` slices
-are identical and any of them can be the worst.
-
-Only 0.431 ns is logic. The other 1.490 ns is routing into the distributed RAM,
-which is where the block spends most of its budget.
-
-Adding `out_reg_free` to `in_ready`, which is what removes the bubble described
-in section 5, cost 0.009 ns. The logic delay did not move at all: the extra term
-folded into LUTs that were already on the path. Before the change the same path
-measured +0.697 ns with 1.911 ns of delay.
+**WNS +0.497 ns** post synthesis.
 
 Reproduce with:
 
@@ -356,11 +337,9 @@ cd sta && vivado -mode batch -source run.tcl
 ### What `FIFO_DEPTH` costs
 
 Depth sets the pointer width, so doubling it adds a bit to the comparison that
-produces `full`, which sits on the worst path. It also grows the distributed
-RAM, which is where the routing delay already goes.
+produces `full`. It also grows the distributed RAM.
 
-At depth 32 there is 0.687 ns of margin, so there is room. The thing to watch is
-not the logic but the RAM: past a certain size Vivado moves the storage into
+The thing to watch is the RAM: past a certain size Vivado moves the storage into
 block RAM, and block RAM has a registered read port. That would break the
 combinational `rd_data` this design depends on, and the read path would cost an
 extra cycle.

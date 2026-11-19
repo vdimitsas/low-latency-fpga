@@ -12,9 +12,9 @@ is wired together.
 
 | Component | Status | WNS at 325 MHz |
 |---|---|---|
-| `seq_extract` | Implemented, verified, timing closed | +1.258 ns |
+| `seq_extract` | Implemented, verified, timing closed | +1.252 ns |
 | `dedup_ingress` | Implemented, verified, timing closed | +0.122 ns |
-| `feed_buffer` | Implemented, verified, timing closed | +0.687 ns |
+| `feed_buffer` | Implemented, verified, timing closed | +0.497 ns |
 | `market_line_arbiter` | Implemented, verified, timing closed | +0.416 ns |
 | `dedup_egress` | Implemented, verified, timing closed | +0.257 ns |
 | `checksum` | Planned | |
@@ -22,7 +22,7 @@ is wired together.
 | `timer` | Planned | |
 
 All figures are post synthesis on a Xilinx Kintex-7 `xc7k160tffg676-3`. Each
-component's own README carries its worst path and how to reproduce it.
+component's own README carries its result and how to reproduce it.
 
 End to end results will be documented at this level once the remaining stages
 exist and the pipeline is integrated.

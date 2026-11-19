@@ -39,8 +39,7 @@ How each of those works is in
 ## Timing
 
 Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.122 ns**
-post synthesis. The worst path, the three steps that got the block here, and
-why it needs a synthesis harness to be measured at all, are in
+post synthesis. Why it needs a synthesis harness to be measured at all is in
 [`docs/dedup_ingress_design.md`](docs/dedup_ingress_design.md), section 6.
 
 ```bash

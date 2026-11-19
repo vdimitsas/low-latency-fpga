@@ -18,7 +18,7 @@ It is written for engineers reviewing or modifying this component directly: read
 
 **`HICCUP_CYCLES` cannot go below 3.** This is structural, explained in section 5, and enforced at compile time. It means the arbiter cannot be configured to give up faster than three silent cycles.
 
-**Timing is post-synthesis only.** Section 6's numbers come from synthesis, not place and route. Routing this component in isolation, with all its ports forced to chip pins, would not produce a number that means anything about the final design, so it is deferred until the surrounding parser stages exist. The IOB overflow noted in section 6 is the same fact seen from another angle.
+**Timing is post-synthesis only.** Section 6's numbers come from synthesis, not place and route. Routing this component in isolation, with all its ports forced to chip pins, would not produce a number that means anything about the final design, so it is deferred until the surrounding parser stages exist.
 
 ## 2. Interface
 
@@ -179,32 +179,7 @@ This part was chosen because it was the device family available in the toolchain
 
 ### Result
 
-All constraints are met. Worst negative slack on setup is +0.416 ns across 534 endpoints, 0 failing. Worst hold slack is +0.090 ns, also 0 failing. Pulse width checks pass with +1.188 ns of margin.
-
-### Worst path
-
-The five worst setup paths in the report are the same logical path repeated across different bit positions of the same destination register, all at +0.416 ns slack:
-
-- Source: `invalidate_feed_q_reg[1]/C`, feed 1's bit of `invalidate_feed_q`.
-- Destination: `skid_byte_cnt_reg[0][*]/CE`, the clock enable on feed 0's skid byte count register.
-- 4 logic levels: LUT4 x1, LUT5 x1, LUT6 x2.
-- Data path delay 2.289 ns: 0.474 ns logic, 1.815 ns routing.
-
-Routing is 79% of the delay because nothing is placed yet. A post-route run will move this number, in either direction, placement and `phys_opt_design` can recover some of it, real routing can also add more.
-
-The path starts at `invalidate_feed_q`, which feeds the `sticky` term in the serve mux. That decides `serve_feed`, and `serve_feed` reaches the clock enable on feed 0's skid registers. The net names in the report (`in_ready_OBUF[0]_inst_i_2` and similar) are synthesis-internal and do not map one-to-one to RTL signal names.
-
-### Resource utilization
-
-400 Slice LUTs (0.39% of the device), 530 Slice Registers (0.26%). 0 Block RAM, 0 DSP. The design is small relative to the device; the timing result is not resource-constrained.
-
-### Caveats on these numbers
-
-Two things limit how far this result can be trusted:
-
-Bonded IOB usage is reported at 515 against 400 available on this package, 128.75% over. That only shows up because this run synthesizes the arbiter standalone, with every port at the chip boundary. Inside the full parser it isn't a top-level module, its ports become internal nets to DEDUP_INGRESS, FEED_BUFFER, and CHECKSUM, and the constraint disappears. It does mean this exact device and package cannot host the arbiter as a true standalone top, so what's reported here is a synthesis-only timing and resource check, not a claim that this configuration places and routes as shown.
-
-These are post-synthesis numbers, not post-route. Placement and routing will move them, so this result is a check on the RTL's structure rather than a final figure.
+All constraints are met. Worst negative slack on setup is +0.416 ns across 534 endpoints, 0 failing.
 
 ## 7. Verification
 
