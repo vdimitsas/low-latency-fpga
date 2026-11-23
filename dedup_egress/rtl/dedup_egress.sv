@@ -69,34 +69,12 @@ module dedup_egress #(
     logic [CPT_DEPTH-1:0]            cpt_occupied;
     logic [CPT_PTR_W-1:0]            cpt_wr_ptr;
 
-    // -------------------------------------------------------------------------
-    // duplicate completion suppression
-    //
-    // A packet can complete more than once. Writing the same sequence number
-    // again would consume an entry and evict a different, still useful one,
-    // shortening the window for no gain. So the write is suppressed when the
-    // value is already present.
-    //
-    // This is a separate comparison from the drop decision: that one compares
-    // the beat's seq, this one compares cmpl_seq. CPT_DEPTH equality
-    // comparisons of SEQ_W bits, on the completion path only.
-    // -------------------------------------------------------------------------
-    logic [CPT_DEPTH-1:0] cmpl_match;
-    logic                 cmpl_present;
-
-    always_comb begin
-        for (int e = 0; e < CPT_DEPTH; e++) begin
-            cmpl_match[e] = cpt_occupied[e] && (cpt_seq[e] == cmpl_seq);
-        end
-        cmpl_present = |cmpl_match;
-    end
-
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             cpt_seq      <= '0;
             cpt_occupied <= '0;
             cpt_wr_ptr   <= '0;
-        end else if (cmpl_valid && !cmpl_present) begin
+        end else if (cmpl_valid) begin
             cpt_seq[cpt_wr_ptr]      <= cmpl_seq;
             cpt_occupied[cpt_wr_ptr] <= 1'b1;
 

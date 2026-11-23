@@ -16,7 +16,7 @@ is wired together.
 | `dedup_ingress` | Implemented, verified, timing closed | +0.122 ns |
 | `feed_buffer` | Implemented, verified, timing closed | +0.497 ns |
 | `market_line_arbiter` | Implemented, verified, timing closed | +0.416 ns |
-| `dedup_egress` | Implemented, verified, timing closed | +0.257 ns |
+| `dedup_egress` | Implemented, verified, timing closed | +1.260 ns |
 | `checksum` | Planned | |
 | `fix_tracker` | Planned | |
 | `timer` | Planned | |

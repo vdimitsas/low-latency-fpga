@@ -39,7 +39,7 @@ How each of those works is in
 
 ## Timing
 
-Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+0.257 ns**
+Closes at 325 MHz on a Xilinx Kintex-7 `xc7k160tffg676-3`, WNS **+1.260 ns**
 post synthesis. Why this block needs a synthesis harness to be measured is in
 [`docs/dedup_egress_design.md`](docs/dedup_egress_design.md), section 6.
 
@@ -50,7 +50,7 @@ cd sta && vivado -mode batch -source run.tcl
 ## Verification
 
 ```bash
-cd verification && make   # 20 tests
+cd verification && make   # 19 tests
 ```
 
 Directed tests cover passthrough, the drop, the same cycle bypass, the

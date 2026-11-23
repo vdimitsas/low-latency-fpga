@@ -79,6 +79,8 @@ Upstream holds `in_valid`, `in_data`, `in_seq`, `in_seq_valid`, `in_sop`,
 signal back to `CHECKSUM`. This block never refuses a completion and never
 stalls because of one.
 
+`cmpl_valid` is high for one cycle per completed packet.
+
 Every beat carries a valid `in_seq`. Beats of the same packet carry the same
 value.
 
@@ -93,27 +95,12 @@ are combinational functions of that register.
 The table is `cpt_seq`, `cpt_occupied` and `cpt_wr_ptr`. It holds up to
 `CPT_DEPTH` sequence numbers that `CHECKSUM` has confirmed.
 
-It is circular. A completion carrying a sequence number not already held is
-written at `cpt_wr_ptr`, which then advances and wraps. Once the table has
-wrapped, each new completion overwrites the oldest entry.
+It is circular. Every completion is written at `cpt_wr_ptr`, which then
+advances and wraps. Once the table has wrapped, each new completion overwrites
+the oldest entry.
 
 There is no full condition. The table is a bounded window of recent
 completions, not a guaranteed record.
-
-### Duplicate completion suppression
-
-A packet can complete more than once. A copy that got past `DEDUP_INGRESS`
-before its twin completed is still served by the arbiter and still checksummed,
-so `CHECKSUM` reports the same sequence number a second time.
-
-Writing it again would consume an entry and evict a different, still useful
-one, shortening the window for no gain. So `cmpl_match` compares `cmpl_seq`
-against every occupied entry, `cmpl_present` is the reduction of that, and the
-write is suppressed when it is high.
-
-This is a separate comparison from the drop decision. That one compares the
-beat's `in_seq`. This one compares `cmpl_seq`. It costs `CPT_DEPTH` equality
-comparisons of `SEQ_W` bits, and it sits on the completion path only.
 
 ### Comparison logic
 
@@ -249,6 +236,13 @@ The consequence is a bounded window. A copy arriving after its completion has
 been evicted passes through. That is a known limitation, and it is tested as
 intended behaviour rather than left as a surprise.
 
+### A repeated completion is not suppressed
+
+A second completion of the same sequence ID takes a second slot. It only
+happens when two copies of a packet both reach `CHECKSUM`, which needs them to
+arrive within a few cycles of each other. Checking for it would put a
+comparison of `cmpl_seq` against every table entry on the write path.
+
 ### Skid buffer
 
 `in_ready` is combinational from `out_ready`. The path is short: `out_ready`
@@ -292,7 +286,7 @@ design.
 
 ### Result
 
-**WNS +0.257 ns** at 325 MHz, post synthesis, zero warnings.
+**WNS +1.260 ns** at 325 MHz, post synthesis, zero warnings.
 
 ## 7. Verification
 
@@ -344,7 +338,7 @@ ones. The directed tests then make their own claims on top of it.
 |---|---|
 | `test_passthrough.py` | An empty table passes everything. A populated table does not drop unrelated sequence numbers. |
 | `test_dedup_egress_core.py` | A later copy is dropped. The same cycle bypass. Table and bypass live in the same cycle. A live completion does not drop an unrelated beat. |
-| `test_cpt.py` | A completion lands with no traffic present. The write pointer advances. The table wraps and evicts the oldest. A straggler outside the window passes. A repeated completion is not rewritten and does not move the pointer. |
+| `test_cpt.py` | A completion lands with no traffic present. The write pointer advances. The table wraps and evicts the oldest. A straggler outside the window passes. A repeated completion takes a second slot. |
 | `test_midpacket.py` | A completion arriving part way through a packet drops the rest of it. The next packet is unaffected. |
 | `test_backpressure.py` | An empty stage always accepts. `in_ready` follows `out_ready` when a beat is held. A dropped beat is accepted with the consumer closed. A whole packet survives backpressure. |
 

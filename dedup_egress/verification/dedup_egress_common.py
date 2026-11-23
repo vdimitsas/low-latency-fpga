@@ -150,16 +150,11 @@ class GoldenDedupEgress:
             self.cpt_match_q = cpt_match
             self.bypass_match_q = bypass_match
 
-        # completed packets table, suppressed when the value is already held
+        # completed packets table, every completion writes
         if self.cmpl_valid:
-            already_held = any(
-                self.cpt_occupied[e] and self.cpt_seq[e] == self.cmpl_seq
-                for e in range(self.cpt_depth)
-            )
-            if not already_held:
-                self.cpt_seq[self.cpt_wr_ptr] = self.cmpl_seq
-                self.cpt_occupied[self.cpt_wr_ptr] = 1
-                self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
+            self.cpt_seq[self.cpt_wr_ptr] = self.cmpl_seq
+            self.cpt_occupied[self.cpt_wr_ptr] = 1
+            self.cpt_wr_ptr = (self.cpt_wr_ptr + 1) % self.cpt_depth
 
         if self.valid_q and not self._drop():
             out_valid = 1

@@ -86,7 +86,7 @@ TIMER starts counting when a checksum fails. It gives the pipeline a set number 
 
 Completion feedback runs from CHECKSUM back to DEDUP_INGRESS, and forward to DEDUP_EGRESS. It tells them a packet has been served successfully, so later copies of it can be dropped.
 
-DEDUP_INGRESS writes every completion, including one whose sequence ID the table already holds. That happens when two copies of a packet both pass DEDUP_INGRESS before the first one completes, which needs them to arrive within a few cycles of each other. The second completion then takes a second slot for the same sequence ID. The write is not suppressed, because suppressing it would put a comparison of `cmpl_seq` against every table entry on the write path.
+DEDUP_INGRESS and DEDUP_EGRESS write every completion, including one whose sequence ID the table already holds. That happens when two copies of a packet both pass DEDUP_INGRESS before the first one completes, which needs them to arrive within a few cycles of each other. The second completion then takes a second slot in each table for the same sequence ID. The write is not suppressed, because suppressing it would put a comparison of `cmpl_seq` against every table entry on the write path.
 
 Number of feeds
 
